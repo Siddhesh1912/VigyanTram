@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Categories & Brands - Compliance Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; font-family:'Roboto', Arial, sans-serif; background:#f4f6f9; color:#333; }
+
+  /* Navbar */
+  .navbar {
+    position: fixed; top:0; left:0; right:0; height:60px;
+    background:#2F3C7E; color:white;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 20px; z-index:1000;
+  }
+  .navbar h2 { margin:0; font-size:22px; }
+  .navbar ul { list-style:none; display:flex; margin:0; padding:0; }
+  .navbar ul li { margin-left:20px; }
+  .navbar ul li a { color:white; text-decoration:none; font-weight:bold; padding:10px 12px; border-radius:5px; }
+  .navbar ul li a:hover, .navbar ul li a.active { background:#1d2659; }
+  .menu-toggle { display:none; font-size:24px; cursor:pointer; }
+
+  @media(max-width:768px){
+    .navbar ul { flex-direction:column; position:absolute; top:60px; left:0; right:0; background:#2F3C7E; display:none; }
+    .navbar ul.show { display:flex; }
+    .navbar ul li { margin:0; }
+    .menu-toggle { display:block; }
+  }
+
+  /* Profile Dropdown */
+  .profile-container { position: relative; display:inline-block; }
+  .profile-icon { width:45px; height:45px; border-radius:50%; border:2px solid white; cursor:pointer; transition:0.3s; }
+  .profile-icon:hover { transform: scale(1.1); }
+  .dropdown-card {
+    display:none;
+    position:absolute; right:0; top:60px;
+    background:white; border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.25);
+    padding:20px; width:280px; text-align:left; z-index:1001;
+  }
+  .dropdown-card.show { display:block; }
+  .dropdown-card .profile-header { display:flex; align-items:center; gap:15px; margin-bottom:15px; }
+  .dropdown-card .profile-header img { width:60px; height:60px; border-radius:50%; border:2px solid #2F3C7E; }
+  .dropdown-card .profile-header div strong { font-size:16px; color:#2F3C7E; }
+  .dropdown-card .profile-header div span { font-size:14px; color:#555; display:block; }
+  .dropdown-card .profile-stats { font-size:14px; color:#333; margin-bottom:15px; }
+  .dropdown-card hr { border:none; border-top:1px solid #eee; margin:10px 0; }
+  .dropdown-card a { display:block; text-decoration:none; color:white; background:#DB5A5A; font-weight:bold; text-align:center; padding:10px 0; border-radius:6px; margin-top:5px; transition:0.3s; }
+  .dropdown-card a:hover { background:#a63b3b; }
+
+  /* Hero Section */
+  .hero {
+    background: linear-gradient(135deg, #2F3C7E, #70C1B3);
+    color:white; text-align:center;
+    border-radius:12px; padding:60px 20px; margin:80px auto 30px auto; max-width:1200px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.2);
+  }
+  .hero h1 { font-size:42px; margin-bottom:20px; line-height:1.2; animation: slideDown 1s ease; }
+  .hero p { font-size:20px; margin-bottom:30px; max-width:800px; margin-left:auto; margin-right:auto; animation: fadeIn 2s ease; }
+  .hero button {
+    background:#DB5A5A; color:white; border:none; padding:15px 30px; font-size:18px;
+    border-radius:8px; font-weight:bold; cursor:pointer; transition:0.3s; animation: slideUp 1s ease;
+  }
+  .hero button:hover { background:#a63b3b; transform: translateY(-3px); }
+
+  @keyframes slideDown {0% { transform: translateY(-50px); opacity:0; } 100% { transform: translateY(0); opacity:1; }}
+  @keyframes slideUp {0% { transform: translateY(50px); opacity:0; } 100% { transform: translateY(0); opacity:1; }}
+  @keyframes fadeIn {0% { opacity:0; } 100% { opacity:1; }}
+
+  /* Content */
+  .content { padding:20px; max-width:1200px; margin:0 auto; }
+
+  /* Cards */
+  .cards { display:flex; gap:20px; justify-content:space-around; flex-wrap:wrap; margin-bottom:20px; }
+  .card { flex:1; min-width:200px; background:white; padding:20px; border-radius:12px; box-shadow:0 3px 6px rgba(0,0,0,0.1); text-align:center; border-top:4px solid #2F3C7E; }
+  .card h2 { margin:10px 0; color:#2F3C7E; }
+
+  /* Filters */
+  .filters { background:white; padding:15px; border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,0.1); margin-bottom:20px; display:flex; flex-wrap:wrap; gap:10px; }
+  .filters input, .filters select, .filters button { padding:8px; border-radius:6px; border:1px solid #ccc; }
+  .filters button { background:#2F3C7E; color:white; border:none; cursor:pointer; }
+  .filters button:hover { background:#1d2659; }
+
+  /* Table */
+  table { width:100%; border-collapse:collapse; background:white; border-radius:8px; overflow:hidden; }
+  th,td { padding:10px; border-bottom:1px solid #ddd; text-align:left; }
+  th { background:#A8D0E6; color:#333; }
+  tr:hover { background:#f1f1f1; transition:0.3s; }
+
+  /* Footer */
+  footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:20px; border-radius:12px; }
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<div class="navbar">
+  <h2>Vigyantram</h2>
+  <span class="menu-toggle" onclick="toggleMenu()">☰</span>
+  <ul id="nav-links">
+    <li><a href="{{ url_for('home') }}">Home</a></li>
+    <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+    <li><a href="{{ url_for('product_monitoring') }}">Product Monitoring</a></li>
+    <li><a href="{{ url_for('violation_reports') }}" >Violation Reports</a></li>
+    <li><a href="{{ url_for('categories') }}"class="active">Categories/Brands</a></li>
+    <li><a href="{{ url_for('geo_heatmap') }}">Geo Heatmap</a></li>
+    <li><a href="{{ url_for('rule_engine') }}">Rule Engine</a></li>
+  </ul>
+
+  <!-- Profile Icon -->
+  <div class="profile-container">
+    <img src="/static/profile.png" alt="Profile" class="profile-icon" onclick="toggleDropdown()">
+    <div class="dropdown-card" id="profileDropdown">
+      <div class="profile-header">
+        <img src="/static/profile.png" alt="Profile Pic">
+        <div>
+          <strong>Rohit Bavale</strong>
+          <span>Email: rohit@example.com</span>
+          <span>Role: Compliance Officer</span>
+        </div>
+      </div>
+      <div class="profile-stats">
+        Work Done: 50 Violations Reviewed
+      </div>
+      <hr>
+      <a href="/logout">Logout</a>
+    </div>
+  </div>
+</div>
+
+<!-- Hero Section -->
+<div class="hero">
+  <h1>Categories & Brands Overview</h1>
+  <p>Get a complete view of all product categories and brands, monitor compliance, and identify which areas need immediate attention.</p>
+  <button onclick="document.getElementById('cardsSection').scrollIntoView({behavior:'smooth'})">Explore Reports</button>
+</div>
+
+<!-- Content -->
+<div class="content" id="cardsSection">
+  <!-- Top Cards -->
+  <div class="cards">
+    <div class="card"><h2>5</h2><p>Total Categories</p></div>
+    <div class="card"><h2>12</h2><p>Total Brands</p></div>
+    <div class="card"><h2>FMCG</h2><p>Most Violated Category</p></div>
+    <div class="card"><h2>ElectroShop</h2><p>Most Violated Brand</p></div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <form>
+      <input type="text" placeholder="Search Category">
+      <input type="text" placeholder="Search Brand">
+      <select>
+        <option value="">All Violations</option>
+        <option value="1">1+</option>
+        <option value="5">5+</option>
+        <option value="10">10+</option>
+      </select>
+      <button type="submit">Filter</button>
+    </form>
+  </div>
+
+  <!-- Table -->
+  <table>
+    <tr>
+      <th>Category</th>
+      <th>Brand</th>
+      <th>Products Monitored</th>
+      <th>Violations Found</th>
+      <th>Compliance %</th>
+      <th>Last Violation Detected</th>
+    </tr>
+    <tr>
+      <td>FMCG</td>
+      <td>DairyMart</td>
+      <td>25</td>
+      <td>5</td>
+      <td>80%</td>
+      <td>2025-09-22</td>
+    </tr>
+    <tr>
+      <td>Electronics</td>
+      <td>ElectroShop</td>
+      <td>15</td>
+      <td>3</td>
+      <td>80%</td>
+      <td>2025-09-21</td>
+    </tr>
+    <tr>
+      <td>Apparel</td>
+      <td>FashionHub</td>
+      <td>10</td>
+      <td>1</td>
+      <td>90%</td>
+      <td>2025-09-19</td>
+    </tr>
+    <tr>
+      <td>FMCG</td>
+      <td>SweetMart</td>
+      <td>12</td>
+      <td>4</td>
+      <td>67%</td>
+      <td>2025-09-20</td>
+    </tr>
+  </table>
+
+  <!-- Chart -->
+  <canvas id="catBrandChart" style="margin-top:30px;"></canvas>
+</div>
+
+<footer>
+  &copy; 2025 Vigyantram | AI Compliance Dashboard
+</footer>
+
+<script>
+function toggleMenu(){
+  document.getElementById('nav-links').classList.toggle('show');
+}
+
+function toggleDropdown(){
+  document.getElementById('profileDropdown').classList.toggle('show');
+}
+
+window.onclick = function(event){
+  if(!event.target.matches('.profile-icon')){
+    document.getElementById('profileDropdown').classList.remove('show');
+  }
+}
+
+// Chart.js example (simple bar chart)
+const ctx = document.getElementById('catBrandChart').getContext('2d');
+const catBrandChart = new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: ['FMCG','Electronics','Apparel','FMCG'],
+    datasets: [{
+      label: 'Violations Found',
+      data: [5,3,1,4],
+      backgroundColor: '#DB5A5A'
+    },{
+      label: 'Products Monitored',
+      data: [25,15,10,12],
+      backgroundColor: '#2F3C7E'
+    }]
+  },
+  options: { responsive:true, plugins:{ legend:{ position:'top' } } }
+});
+</script>
+</body>
+</html>

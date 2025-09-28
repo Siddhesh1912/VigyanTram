@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigyantram - AI Compliance Checker</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* Reset & Body */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Roboto', Arial, sans-serif;
+  background:#f4f6f9;
+  color:#333;
+}
+
+/* Navbar */
+.navbar {
+  position: fixed; top:0; left:0; right:0; height:60px;
+  background:#2F3C7E; color:white; display:flex; align-items:center;
+  justify-content:space-between; padding:0 20px; z-index:1000;
+}
+.navbar h2 { font-size:22px; }
+.navbar ul {
+  list-style:none;
+  display:flex;
+  align-items:center;
+  gap:15px;
+}
+.navbar ul li a {
+  color:white; text-decoration:none; font-weight:bold;
+  padding:10px 12px; border-radius:5px;
+  transition:0.3s;
+}
+.navbar ul li a:hover, .navbar ul li a.active { background:#1d2659; }
+
+.menu-toggle { display:none; font-size:24px; cursor:pointer; }
+
+/* Profile Dropdown */
+.profile-dropdown { position: relative; display: inline-block; cursor: pointer; }
+.profile-dropdown img {
+  width:45px; height:45px; border-radius:50%;
+  border:2px solid white; cursor:pointer; transition: transform 0.3s;
+}
+.profile-dropdown img:hover { transform: scale(1.1); }
+
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 60px;
+  background: white;
+  border-radius: 12px;
+  width: 300px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  z-index: 2000;
+  padding: 20px;
+  font-family: 'Roboto', sans-serif;
+}
+
+.dropdown-menu.show { display: block; }
+
+.dropdown-menu .profile-header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.dropdown-menu .profile-header img {
+  width:60px;
+  height:60px;
+  border-radius:50%;
+  border:2px solid #2F3C7E;
+}
+
+.dropdown-menu .profile-header div strong {
+  font-size:16px;
+  color:#2F3C7E;
+}
+.dropdown-menu .profile-header div span {
+  font-size:14px;
+  color:#555;
+}
+
+.dropdown-menu .profile-stats {
+  margin-bottom:15px;
+  font-size:14px;
+  color:#333;
+}
+
+.dropdown-menu hr { border:none; border-top:1px solid #eee; margin:10px 0; }
+
+.dropdown-menu a {
+  display:block;
+  text-decoration:none;
+  color:white;
+  font-weight:bold;
+  text-align:center;
+  padding:10px 0;
+  border-radius:6px;
+  background:#DB5A5A;
+  transition:0.3s;
+}
+.dropdown-menu a:hover { background:#a63b3b; }
+
+/* Responsive Navbar */
+@media (max-width:768px){
+  .navbar ul { 
+    flex-direction:column; position:absolute; top:60px; left:0; right:0; 
+    background:#2F3C7E; display:none; 
+  }
+  .navbar ul.show { display:flex; }
+  .navbar ul li { margin:0; }
+  .menu-toggle { display:block; }
+}
+
+/* Hero Section */
+.hero {
+  height:50vh;
+  background: linear-gradient(to right, #2F3C7E, #70C1B3);
+  color:white; display:flex; flex-direction:column; justify-content:center; align-items:center;
+  text-align:center; padding:0 20px; margin-top:60px;
+  overflow:hidden;
+}
+.hero h1 { font-size:48px; margin-bottom:20px; animation: slideDown 1s ease; }
+.hero p { font-size:20px; margin-bottom:30px; animation: fadeIn 2s ease; }
+.hero button {
+  background:#DB5A5A; border:none; padding:15px 30px; border-radius:8px;
+  color:white; font-weight:bold; cursor:pointer; transition:0.3s; animation: slideUp 1s ease;
+}
+.hero button:hover { background:#a63b3b; }
+
+@keyframes slideDown { 0% { transform: translateY(-50px); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+@keyframes slideUp { 0% { transform: translateY(50px); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+@keyframes fadeIn { 0% { opacity:0; } 100% { opacity:1; } }
+
+/* Workflow Section */
+.workflow { max-width:1000px; margin:50px auto; text-align:center; }
+.workflow h2 { margin-bottom:20px; color:#2F3C7E; }
+.steps { display:flex; flex-wrap:wrap; justify-content:space-around; gap:30px; }
+.step {
+  flex:1; min-width:250px; background:white; padding:20px; border-radius:12px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);
+  transition:0.3s transform; position:relative;
+}
+.step:hover { transform: translateY(-8px); }
+.step::before {
+  content:'✔';
+  font-size:30px; color:#2F3C7E;
+  position:absolute; top:-15px; left:calc(50% - 15px);
+  background:white; border-radius:50%; padding:5px;
+}
+.step h3 { margin-top:20px; margin-bottom:10px; color:#2F3C7E; }
+.step p { font-size:14px; }
+
+/* Footer */
+footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:20px; }
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<div class="navbar">
+  <h2>Vigyantram</h2>
+  <span class="menu-toggle" onclick="toggleMenu()">☰</span>
+  
+  <ul id="nav-links">
+    <li><a href="{{ url_for('home') }}" class="active">Home</a></li>
+    <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+    <li><a href="{{ url_for('product_monitoring') }}">Product Monitoring</a></li>
+    <li><a href="{{ url_for('violation_reports') }}">Violation Reports</a></li>
+    <li><a href="{{ url_for('categories') }}">Categories/Brands</a></li>
+    <li><a href="{{ url_for('geo_heatmap') }}">Geo Heatmap</a></li>
+    <li><a href="{{ url_for('rule_engine') }}">Rule Engine</a></li>
+  </ul>
+
+  <!-- Profile Dropdown -->
+  <div class="profile-dropdown">
+    <img src="{{ url_for('static', filename='profile.png') }}" alt="Profile" class="dropdown-toggle" title="User Profile" onclick="toggleProfileMenu()">
+    
+    <div class="dropdown-menu" id="profileMenu">
+      <div class="profile-header">
+        <img src="{{ url_for('static', filename='profile.png') }}" alt="Profile Pic">
+        <div>
+          <strong>Rohit Bavale</strong>
+          <span>rohitbavale35@gmail.com</span>
+          <span>Role: Compliance Officer</span>
+        </div>
+      </div>
+      <div class="profile-stats">
+        Work Done: 50 Products Checked
+      </div>
+      <hr>
+      <a href="{{ url_for('logout') }}">Logout</a>
+    </div>
+  </div>
+</div>
+
+<!-- Hero Section -->
+<div class="hero">
+  <h1>AI-Powered Legal Metrology Compliance Checker</h1>
+  <p>Automatically scans e-commerce product listings to detect compliance with Legal Metrology rules</p>
+  <button onclick="location.href='{{ url_for('product_monitoring') }}'">Check a Product Now</button>
+</div>
+
+<!-- Workflow Section -->
+<div class="workflow">
+  <h2>How It Works</h2>
+  <div class="steps">
+    <div class="step">
+      <h3>1. Crawl & Extract Data</h3>
+      <p>Collect product details from e-commerce listings and images in real-time.</p>
+    </div>
+    <div class="step">
+      <h3>2. AI & OCR Analysis</h3>
+      <p>Use OCR and AI to extract label text and identify declarations.</p>
+    </div>
+    <div class="step">
+      <h3>3. Rule Validation</h3>
+      <p>Compare extracted fields with Legal Metrology requirements to detect non-compliance.</p>
+    </div>
+    <div class="step">
+      <h3>4. Dashboard & Reports</h3>
+      <p>Visualize compliance trends, generate reports, and monitor violations.</p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  &copy; 2025 Vigyantram | All Rights Reserved
+</footer>
+
+<script>
+function toggleMenu() {
+  document.getElementById('nav-links').classList.toggle('show');
+}
+
+function toggleProfileMenu() {
+  document.getElementById('profileMenu').classList.toggle('show');
+}
+
+// Close dropdown if clicked outside
+window.onclick = function(event) {
+  if (!event.target.matches('.dropdown-toggle')) {
+    var dropdowns = document.getElementsByClassName("dropdown-menu");
+    for (var i = 0; i < dropdowns.length; i++) {
+      dropdowns[i].classList.remove('show');
+    }
+  }
+}
+</script>
+
+</body>
+</html>

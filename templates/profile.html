@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>User Profile - Vigyantram</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    font-family: 'Roboto', Arial, sans-serif;
+    background:#f4f6f9;
+    margin:0;
+    padding:0;
+  }
+
+  /* Navbar */
+  .navbar {
+    position: fixed; top:0; left:0; right:0; height:60px;
+    background:#2F3C7E; color:white; display:flex; align-items:center;
+    justify-content:space-between; padding:0 20px; z-index:1000;
+  }
+  .navbar h2 { font-size:22px; }
+  .navbar ul { list-style:none; display:flex; gap:15px; margin:0; padding:0; }
+  .navbar ul li a { color:white; text-decoration:none; font-weight:bold; padding:10px 12px; border-radius:5px; transition:0.3s; }
+  .navbar ul li a:hover, .navbar ul li a.active { background:#1d2659; }
+
+  /* Profile Icon */
+  .profile-container {
+    position: relative;
+    cursor: pointer;
+  }
+  .profile-container img {
+    width:40px; height:40px; border-radius:50%;
+    border:2px solid white; transition: transform 0.3s;
+  }
+  .profile-container img:hover { transform: scale(1.1); }
+
+  /* Dropdown Card */
+  .dropdown-card {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 50px;
+    width: 250px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    padding: 20px;
+    color: #333;
+    z-index: 2000;
+  }
+  .dropdown-card h3 {
+    margin-bottom: 10px;
+    color: #2F3C7E;
+  }
+  .dropdown-card p {
+    margin: 5px 0;
+    font-size: 14px;
+  }
+  .dropdown-card a {
+    display: block;
+    margin-top: 15px;
+    padding: 10px;
+    text-align: center;
+    background:#DB5A5A;
+    color:white;
+    text-decoration:none;
+    border-radius:6px;
+    font-weight:bold;
+  }
+  .dropdown-card a:hover { background:#a63b3b; }
+
+  /* Content placeholder */
+  .content {
+    margin-top: 80px;
+    text-align: center;
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+
+<!-- Navbar with Profile Icon -->
+<div class="navbar">
+  <h2>Vigyantram</h2>
+  <ul>
+    <li><a href="/" class="active">Home</a></li>
+    <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+    <li><a href="{{ url_for('product_monitoring') }}">Product Monitoring</a></li>
+  </ul>
+
+  <!-- Profile Icon -->
+  <div class="profile-container" onclick="toggleDropdown()">
+    <img src="{{ url_for('static', filename='profile.png') }}" alt="Profile" class="profile-icon">
+    <div class="dropdown-card" id="dropdownCard">
+      <h3>{{ user_name }}</h3>
+      <p>Tasks Completed: {{ tasks_done }}</p>
+      <a href="{{ url_for('logout') }}">Logout</a>
+    </div>
+  </div>
+</div>
+
+<style>
+.navbar { display:flex; justify-content:space-between; align-items:center; background:#2F3C7E; padding:10px 20px; color:white; position:relative; }
+.navbar ul { list-style:none; display:flex; gap:15px; margin:0; padding:0; }
+.navbar ul li a { color:white; text-decoration:none; padding:8px 12px; border-radius:5px; }
+.navbar ul li a:hover, .navbar ul li a.active { background:#1d2659; }
+
+.profile-container { position:relative; cursor:pointer; }
+.profile-icon { width:40px; height:40px; border-radius:50%; border:2px solid white; }
+.dropdown-card {
+  display:none;
+  position:absolute;
+  top:50px; right:0;
+  width:220px;
+  background:white;
+  color:#333;
+  border-radius:10px;
+  box-shadow:0 5px 15px rgba(0,0,0,0.2);
+  padding:15px;
+  z-index:1000;
+}
+.dropdown-card h3 { margin:0 0 10px 0; color:#2F3C7E; }
+.dropdown-card p { margin:5px 0; font-size:14px; }
+.dropdown-card a {
+  display:block;
+  margin-top:10px;
+  text-align:center;
+  background:#DB5A5A;
+  color:white;
+  text-decoration:none;
+  padding:10px;
+  border-radius:6px;
+  font-weight:bold;
+}
+.dropdown-card a:hover { background:#a63b3b; }
+</style>
+
+<script>
+function toggleDropdown() {
+  var card = document.getElementById('dropdownCard');
+  card.style.display = (card.style.display === 'block') ? 'none' : 'block';
+}
+
+// Close dropdown when clicking outside
+window.onclick = function(event) {
+  if (!event.target.closest('.profile-container')) {
+    document.getElementById('dropdownCard').style.display = 'none';
+  }
+}
+</script>

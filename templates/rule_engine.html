@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rule Engine Dashboard - Compliance Checker</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    margin:0; font-family: 'Roboto', sans-serif; background:#f4f6f9; color:#333;
+  }
+
+  /* Navbar */
+  .navbar {
+    position: fixed; top:0; left:0; right:0; height:60px;
+    background:#2F3C7E; color:white; display:flex; align-items:center;
+    justify-content:space-between; padding:0 20px; z-index:1000;
+    box-shadow:0 3px 6px rgba(0,0,0,0.1);
+  }
+  .navbar h2 { margin:0; font-size:20px; }
+  .navbar ul { list-style:none; display:flex; margin:0; padding:0; }
+  .navbar ul li { margin-left:20px; }
+  .navbar ul li a { color:white; text-decoration:none; font-weight:bold; padding:10px 12px; border-radius:5px; transition:0.3s; }
+  .navbar ul li a:hover, .navbar ul li a.active { background:#1d2659; }
+  .menu-toggle { display:none; cursor:pointer; font-size:24px; }
+  @media (max-width:768px){
+    .navbar ul { flex-direction:column; display:none; position:absolute; top:60px; left:0; right:0; background:#2F3C7E; }
+    .navbar ul.show { display:flex; }
+    .navbar ul li { margin:0; }
+    .menu-toggle { display:block; }
+  }
+
+  /* Profile Dropdown */
+  .profile-container { position: relative; display:inline-block; }
+  .profile-icon { width:45px; height:45px; border-radius:50%; border:2px solid white; cursor:pointer; transition:0.3s; }
+  .profile-icon:hover { transform: scale(1.1); }
+  .dropdown-card {
+    display:none; position:absolute; right:0; top:60px;
+    background:white; border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.25);
+    padding:20px; width:280px; text-align:left; z-index:1001;
+  }
+  .dropdown-card.show { display:block; }
+  .dropdown-card .profile-header { display:flex; align-items:center; gap:15px; margin-bottom:15px; }
+  .dropdown-card .profile-header img { width:60px; height:60px; border-radius:50%; border:2px solid #2F3C7E; }
+  .dropdown-card .profile-header div strong { font-size:16px; color:#2F3C7E; }
+  .dropdown-card .profile-header div span { font-size:14px; color:#555; display:block; }
+  .dropdown-card .profile-stats { font-size:14px; color:#333; margin-bottom:15px; }
+  .dropdown-card hr { border:none; border-top:1px solid #eee; margin:10px 0; }
+  .dropdown-card a { display:block; text-decoration:none; color:white; background:#DB5A5A; font-weight:bold; text-align:center; padding:10px 0; border-radius:6px; margin-top:5px; transition:0.3s; }
+  .dropdown-card a:hover { background:#a63b3b; }
+
+  /* Hero Section */
+  .hero {
+    background: linear-gradient(135deg, #2F3C7E, #70C1B3);
+    color:white; text-align:center;
+    border-radius:12px; padding:60px 20px; margin:80px auto 30px auto; max-width:1200px;
+    box-shadow:0 10px 25px rgba(0,0,0,0.2);
+  }
+  .hero h1 { font-size:42px; margin-bottom:20px; line-height:1.2; animation: slideDown 1s ease; }
+  .hero p { font-size:20px; margin-bottom:30px; max-width:800px; margin-left:auto; margin-right:auto; animation: fadeIn 2s ease; }
+  .hero button { background:#DB5A5A; color:white; border:none; padding:15px 30px; font-size:18px; border-radius:8px; font-weight:bold; cursor:pointer; transition:0.3s; animation: slideUp 1s ease; }
+  .hero button:hover { background:#a63b3b; transform: translateY(-3px); }
+
+  @keyframes slideDown {0% { transform: translateY(-50px); opacity:0; } 100% { transform: translateY(0); opacity:1; }}
+  @keyframes slideUp {0% { transform: translateY(50px); opacity:0; } 100% { transform: translateY(0); opacity:1; }}
+  @keyframes fadeIn {0% { opacity:0; } 100% { opacity:1; }}
+
+  /* Content Cards */
+  .content { max-width:1200px; margin:30px auto 0 auto; padding:0 20px; }
+  .cards { display:flex; gap:20px; justify-content:space-around; flex-wrap:wrap; margin-bottom:30px; }
+  .card { flex:1; min-width:220px; background:white; padding:20px; border-radius:12px; 
+          box-shadow:0 3px 12px rgba(0,0,0,0.1); text-align:center; border-left:5px solid #2F3C7E;
+          transition:0.3s; cursor:pointer; }
+  .card:hover { transform:translateY(-5px); box-shadow:0 6px 18px rgba(0,0,0,0.15); }
+  .card h2 { font-size:28px; margin-bottom:5px; color:#2F3C7E; }
+  .card p { font-size:14px; color:#555; }
+
+  /* Filters */
+  .filters { display:flex; flex-wrap:wrap; gap:15px; background:white; padding:20px; border-radius:12px; 
+             box-shadow:0 3px 12px rgba(0,0,0,0.05); margin-bottom:30px; }
+  .filters input, .filters select { padding:10px; border-radius:8px; border:1px solid #ccc; font-size:14px; flex:1; min-width:150px; }
+  .filters button { padding:10px 20px; border:none; border-radius:8px; background:#2F3C7E; color:white; font-weight:bold; cursor:pointer; transition:0.3s; }
+  .filters button:hover { background:#1d2659; }
+
+  /* Table */
+  .table-container { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; background:white; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+  th,td { padding:12px; border-bottom:1px solid #ddd; text-align:left; }
+  th { background:#A8D0E6; color:#333; font-weight:500; }
+  tr:hover { background:#f1f1f1; }
+
+  /* Badges */
+  .status-enabled { color:green; font-weight:bold; background:#e0f8e0; padding:4px 10px; border-radius:5px; text-align:center; display:inline-block; }
+  .status-disabled { color:red; font-weight:bold; background:#f8e0e0; padding:4px 10px; border-radius:5px; text-align:center; display:inline-block; }
+  .severity-high { background:#f8d7da; color:#721c24; padding:4px 8px; border-radius:5px; font-weight:bold; }
+  .severity-medium { background:#fff3cd; color:#856404; padding:4px 8px; border-radius:5px; font-weight:bold; }
+  .severity-low { background:#d1ecf1; color:#0c5460; padding:4px 8px; border-radius:5px; font-weight:bold; }
+
+  footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:30px; border-radius:8px; }
+
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<div class="navbar">
+  <h2>Vigyantram</h2>
+  <span class="menu-toggle" onclick="toggleMenu()">☰</span>
+  <ul id="nav-links">
+    <li><a href="{{ url_for('home') }}" >Home</a></li>
+    <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+    <li><a href="{{ url_for('product_monitoring') }}">Product Monitoring</a></li>
+    <li><a href="{{ url_for('violation_reports') }}">Violation Reports</a></li>
+    <li><a href="{{ url_for('categories') }}">Categories/Brands</a></li>
+    <li><a href="{{ url_for('geo_heatmap') }}">Geo Heatmap</a></li>
+    <li><a href="{{ url_for('rule_engine') }}" class="active">Rule Engine</a></li>
+  </ul>
+
+  <!-- Profile -->
+  <div class="profile-container">
+    <img src="/static/profile.png" class="profile-icon" onclick="toggleDropdown()">
+    <div class="dropdown-card" id="profileDropdown">
+      <div class="profile-header">
+        <img src="/static/profile.png">
+        <div>
+          <strong>Rohit Bavale</strong>
+          <span>Email: rohit@example.com</span>
+          <span>Role: Compliance Officer</span>
+        </div>
+      </div>
+      <div class="profile-stats">Work Done: 50 Rules Reviewed</div>
+      <hr>
+      
+      <a href="/logout">Logout</a>
+    </div>
+  </div>
+</div>
+
+<!-- Hero -->
+<div class="hero">
+  <h1>Rule Engine - Product Compliance</h1>
+  <p>View and manage all government product rules with AI-powered compliance checking. Quickly see which rules are active and which need attention.</p>
+  <button onclick="document.querySelector('.content').scrollIntoView({behavior:'smooth'})">Explore Rules</button>
+</div>
+
+<!-- Content -->
+<div class="content">
+  <div class="cards">
+    <div class="card"><h2>152</h2><p>Total Rules</p></div>
+    <div class="card"><h2>120</h2><p>Active Rules</p></div>
+    <div class="card"><h2>32</h2><p>Inactive Rules</p></div>
+  </div>
+
+  <div class="filters">
+    <input type="text" placeholder="Search Rule Name or Description">
+    <select>
+      <option value="">All Severity</option>
+      <option value="High">High</option>
+      <option value="Medium">Medium</option>
+      <option value="Low">Low</option>
+    </select>
+    <select>
+      <option value="">All Categories</option>
+      <option value="Labeling">Labeling</option>
+      <option value="MRP">MRP</option>
+      <option value="Net Quantity">Net Quantity</option>
+      <option value="Consumer Care">Consumer Care</option>
+    </select>
+    <button>Filter</button>
+  </div>
+
+  <div class="table-container">
+    <table>
+      <tr>
+        <th>Rule Name</th>
+        <th>Description</th>
+        <th>Severity</th>
+        <th>Status</th>
+        <th>Source</th>
+      </tr>
+      <tr>
+        <td>Mandatory MRP Display</td>
+        <td>All packaged products must display MRP</td>
+        <td><span class="severity-high">High</span></td>
+        <td><span class="status-enabled">Enabled</span></td>
+        <td><a href="#" target="_blank">Govt Gazette</a></td>
+      </tr>
+      <tr>
+        <td>Labeling Requirements</td>
+        <td>Products must include manufacturer and net quantity</td>
+        <td><span class="severity-medium">Medium</span></td>
+        <td><span class="status-enabled">Enabled</span></td>
+        <td><a href="#" target="_blank">Govt Gazette</a></td>
+      </tr>
+      <tr>
+        <td>Consumer Care Number</td>
+        <td>All products must display valid consumer care number</td>
+        <td><span class="severity-low">Low</span></td>
+        <td><span class="status-disabled">Disabled</span></td>
+        <td><a href="#" target="_blank">Govt Gazette</a></td>
+      </tr>
+      <tr>
+        <td>Expiry Date Labeling</td>
+        <td>Products with shelf-life must show expiry date</td>
+        <td><span class="severity-high">High</span></td>
+        <td><span class="status-enabled">Enabled</span></td>
+        <td><a href="#" target="_blank">Govt Gazette</a></td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<footer>&copy; 2025 Vigyantram | AI Compliance Checker</footer>
+
+<script>
+function toggleMenu() { document.getElementById('nav-links').classList.toggle('show'); }
+function toggleDropdown(){ document.getElementById('profileDropdown').classList.toggle('show'); }
+window.onclick = function(event){
+  if(!event.target.matches('.profile-icon')){
+    document.getElementById('profileDropdown').classList.remove('show');
+  }
+}
+</script>
+</body>
+</html>

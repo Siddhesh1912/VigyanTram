@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Product Monitoring - Compliance Checker</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    margin:0;
+    font-family: 'Roboto', Arial, sans-serif;
+    background:#f4f6f9;
+    color:#333;
+  }
+
+  /* Navbar */
+  .navbar {
+    position: fixed; top:0; left:0; right:0; height:60px;
+    background:#2F3C7E; color:white; display:flex; align-items:center;
+    justify-content:space-between; padding:0 20px; z-index:1000;
+  }
+  .navbar h2 { margin:0; font-size:22px; }
+  .navbar ul { list-style:none; display:flex; margin:0; padding:0; }
+  .navbar ul li { margin-left:20px; }
+  .navbar ul li a { color:white; text-decoration:none; font-weight:bold; padding:10px 12px; border-radius:5px; }
+  .navbar ul li a:hover, .navbar ul li a.active { background:#1d2659; }
+  .menu-toggle { display:none; font-size:24px; cursor:pointer; }
+
+  /* Profile Icon & Dropdown */
+  .profile-container { position: relative; display:inline-block; }
+  .profile-icon { width:45px; height:45px; border-radius:50%; border:2px solid white; cursor:pointer; transition:0.3s; }
+  .profile-icon:hover { transform: scale(1.1); }
+  .dropdown-card {
+    display:none;
+    position:absolute;
+    right:0;
+    top:60px;
+    background:white;
+    border-radius:12px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.25);
+    padding:20px;
+    width:280px;
+    text-align:left;
+    z-index:1001;
+    font-family:'Roboto', sans-serif;
+  }
+  .dropdown-card.show { display:block; }
+
+  .dropdown-card .profile-header {
+    display:flex;
+    align-items:center;
+    gap:15px;
+    margin-bottom:15px;
+  }
+  .dropdown-card .profile-header img {
+    width:60px; height:60px; border-radius:50%; border:2px solid #2F3C7E;
+  }
+  .dropdown-card .profile-header div strong { font-size:16px; color:#2F3C7E; }
+  .dropdown-card .profile-header div span { font-size:14px; color:#555; display:block; }
+  .dropdown-card .profile-stats { font-size:14px; color:#333; margin-bottom:15px; }
+  .dropdown-card hr { border:none; border-top:1px solid #eee; margin:10px 0; }
+  .dropdown-card a {
+    display:block; text-decoration:none; color:white; background:#DB5A5A; font-weight:bold;
+    text-align:center; padding:10px 0; border-radius:6px; margin-top:5px; transition:0.3s;
+  }
+  .dropdown-card a:hover { background:#a63b3b; }
+
+  @media(max-width:768px){
+    .navbar ul { flex-direction:column; position:absolute; top:60px; left:0; right:0; background:#2F3C7E; display:none; }
+    .navbar ul.show { display:flex; }
+    .navbar ul li { margin:0; }
+    .menu-toggle { display:block; }
+  }
+
+  /* Hero Section */
+  .hero {
+    background: linear-gradient(135deg, #2F3C7E, #70C1B3);
+    color: white;
+    text-align: center;
+    border-radius: 12px;
+    padding: 60px 20px;
+    margin: 80px auto 30px auto;
+    max-width: 1000px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .hero h1 {
+    font-size: 42px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    line-height: 1.2;
+    animation: slideDown 1s ease;
+  }
+  .hero p {
+    font-size: 20px;
+    margin-bottom: 30px;
+    max-width: 700px;
+    animation: fadeIn 2s ease;
+  }
+  .hero button {
+    background: #DB5A5A;
+    color: white;
+    border: none;
+    padding: 15px 30px;
+    font-size: 18px;
+    border-radius: 8px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+    animation: slideUp 1s ease;
+  }
+  .hero button:hover { background: #a63b3b; transform: translateY(-3px); }
+
+  @keyframes slideDown { 0% { transform: translateY(-50px); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+  @keyframes slideUp { 0% { transform: translateY(50px); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+  @keyframes fadeIn { 0% { opacity:0; } 100% { opacity:1; } }
+
+  /* Main Content */
+  .content { padding:20px; max-width:1000px; margin:0 auto; }
+
+  /* Card Layout */
+  .card-container { display:flex; flex-wrap:wrap; gap:20px; justify-content:center; margin-bottom:20px; }
+  .card {
+    flex:1; min-width:250px; max-width:300px; background:white; padding:20px;
+    border-radius:12px; box-shadow:0 5px 15px rgba(0,0,0,0.1); transition:0.3s transform;
+  }
+  .card:hover { transform: translateY(-5px); }
+  .card h2 { margin:0 0 10px 0; color:#2F3C7E; text-align:center; }
+  .card label { font-weight:bold; display:block; margin-top:10px; }
+  .card select, .card input[type="text"], .card input[type="file"] {
+    width:100%; padding:10px; margin-top:5px; border-radius:8px; border:1px solid #ccc; transition:0.3s;
+  }
+  .card select:focus, .card input:focus { border-color:#2F3C7E; box-shadow:0 0 8px rgba(47,60,126,0.4); outline:none; }
+  .card button { margin-top:15px; padding:12px 20px; background:#2F3C7E; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; transition:0.3s; width:100%; }
+  .card button:hover { background:#1d2659; transform: translateY(-3px); }
+
+  /* Results Section */
+  .result-card { background:white; padding:15px; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,0.1); margin-bottom:15px; transition: transform 0.3s; }
+  .result-card:hover { transform: translateY(-5px); }
+  .compliant { color:green; font-weight:bold; }
+  .non-compliant { color:red; font-weight:bold; }
+
+  /* Footer */
+  footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:20px; }
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<div class="navbar">
+  <h2>Vigyantram</h2>
+  <span class="menu-toggle" onclick="toggleMenu()">☰</span>
+  <ul id="nav-links">
+    <li><a href="/">Home</a></li>
+    <li><a href="/dashboard">Dashboard</a></li>
+    <li><a href="/product_monitoring" class="active">Product Monitoring</a></li>
+    <li><a href="/violation_reports">Violation Reports</a></li>
+    <li><a href="/categories">Categories/Brands</a></li>
+    <li><a href="/geo_heatmap">Geo Heatmap</a></li>
+    <li><a href="/rule_engine">Rule Engine</a></li>
+  </ul>
+
+  <!-- Profile Icon -->
+  <div class="profile-container">
+    <img src="/static/profile.png" alt="Profile" class="profile-icon" onclick="toggleDropdown()">
+    <div class="dropdown-card" id="profileDropdown">
+      <div class="profile-header">
+        <img src="/static/profile.png" alt="Profile Pic">
+        <div>
+          <strong>Rohit Bavale</strong>
+          <span>Email: rohit@example.com</span>
+          <span>Role: Compliance Officer</span>
+        </div>
+      </div>
+      <div class="profile-stats">
+        Work Done: 50 Products Checked
+      </div>
+      <hr>
+      
+      <a href="/logout">Logout</a>
+    </div>
+  </div>
+</div>
+
+<!-- Hero Section -->
+<div class="hero">
+  <h1>AI-Powered Product Compliance Checker</h1>
+  <p>Automatically scan e-commerce product listings to detect compliance with government rules and regulations.</p>
+  <button onclick="document.getElementById('results').scrollIntoView({behavior:'smooth'})">Check a Product Now</button>
+</div>
+
+<div class="content">
+
+  <!-- Cards for Inputs -->
+  <div class="card-container">
+
+    <!-- Card 1: Category + Time -->
+    <div class="card">
+      <h2>Choose Category & Time</h2>
+      <form>
+        <label for="category">Category:</label>
+        <select id="category" name="category">
+          <option value="">All Categories</option>
+          <option value="protein">Protein</option>
+          <option value="mobile">Mobile</option>
+          <option value="laptop">Laptop</option>
+        </select>
+
+        <label for="time">Time Filter:</label>
+        <select id="time" name="time">
+          <option value="">All Time</option>
+          <option value="latest">Latest</option>
+          <option value="1_month">1 Month Ago</option>
+          <option value="3_months">3 Months Ago</option>
+        </select>
+
+        <button type="submit">Check Compliance</button>
+      </form>
+    </div>
+
+    <!-- Card 2: Paste Product Link -->
+    <div class="card">
+      <h2>Paste Product Link</h2>
+      <form>
+        <label for="url">Product URL:</label>
+        <input type="text" id="url" name="url" placeholder="Paste e-commerce product link">
+        <button type="submit">Check Compliance</button>
+      </form>
+    </div>
+
+    <!-- Card 3: Upload Photo -->
+    <div class="card">
+      <h2>Upload Product Photo</h2>
+      <form enctype="multipart/form-data">
+        <label for="image">Select Image:</label>
+        <input type="file" id="image" name="image">
+        <button type="submit">Check Compliance</button>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- Results Section -->
+  <div id="results">
+    <div class="result-card">
+      <h3>Compliance Status: <span class="compliant">✅ Compliant</span></h3>
+      <p><strong>Source URL:</strong> https://example.com/product/12345</p>
+      <p><strong>MRP:</strong> ₹499</p>
+      <p><strong>Net Quantity:</strong> 500g</p>
+      <p><strong>Manufacturer:</strong> Example Manufacturer</p>
+      <p><strong>Country of Origin:</strong> India</p>
+      <p><strong>Consumer Care:</strong> 1800-123-456</p>
+    </div>
+
+    <div class="result-card">
+      <h3>Compliance Status: <span class="non-compliant">❌ Non-Compliant</span></h3>
+      <p><strong>Source URL:</strong> https://example.com/product/67890</p>
+      <p><strong>Issue:</strong> MRP missing on label</p>
+    </div>
+  </div>
+
+  <!-- Download Report Button -->
+<div class="result-card" style="text-align:center; margin-top:20px;">
+  <form method="POST" action="{{ url_for('download_report') }}">
+    <!-- Hidden input to send product_id -->
+    <input type="hidden" name="product_id" value="{{ results.product_id }}">
+    <button type="submit" 
+            style="background:#DB5A5A; color:white; padding:12px 25px; border:none; border-radius:8px; font-weight:bold; cursor:pointer; font-size:16px;">
+      Download Report PDF
+    </button>
+  </form>
+</div>
+
+
+</div>
+
+<!-- Footer -->
+<footer>
+  &copy; 2025 Vigyantram | AI Compliance Checker
+</footer>
+
+<script>
+function toggleMenu() {
+  document.getElementById('nav-links').classList.toggle('show');
+}
+
+// Profile Dropdown Toggle
+function toggleDropdown() {
+  document.getElementById('profileDropdown').classList.toggle('show');
+}
+window.onclick = function(event) {
+  if (!event.target.matches('.profile-icon')) {
+    var dropdowns = document.getElementsByClassName("dropdown-card");
+    for (var i = 0; i < dropdowns.length; i++) {
+      dropdowns[i].classList.remove('show');
+    }
+  }
+}
+</script>
+
+</body>
+</html>
