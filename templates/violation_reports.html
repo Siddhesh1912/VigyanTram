@@ -156,9 +156,6 @@
     <input type="text" id="sellerFilter" placeholder="Search Seller">
     <select id="categoryFilter">
       <option value="">All Categories</option>
-      <option value="FMCG">FMCG</option>
-      <option value="Electronics">Electronics</option>
-      <option value="Apparel">Apparel</option>
     </select>
     <select id="statusFilter">
       <option value="">All Status</option>
@@ -190,13 +187,123 @@
 </footer>
 
 <script>
-const violations = [
-  {title:"Milk Pack 500ml", seller:"DairyMart", issue:"Wrong weight", severity:"High", detected_at:"2025-09-20", status:"Open", category:"FMCG"},
-  {title:"LED TV 32inch", seller:"ElectroShop", issue:"Missing declaration", severity:"Medium", detected_at:"2025-09-18", status:"Resolved", category:"Electronics"},
-  {title:"T-Shirt L", seller:"FashionHub", issue:"Incorrect label", severity:"Low", detected_at:"2025-09-19", status:"Open", category:"Apparel"},
-  {title:"Chocolate Box", seller:"SweetMart", issue:"Wrong price", severity:"Medium", detected_at:"2025-09-21", status:"Open", category:"FMCG"},
-  {title:"Smartphone X", seller:"ElectroShop", issue:"Missing info", severity:"High", detected_at:"2025-09-22", status:"Resolved", category:"Electronics"},
-];
+// Function to parse CSV data
+function parseCSV(csvText) {
+  const lines = csvText.split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+  const data = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      data.push(row);
+    }
+  }
+  return data;
+}
+
+// Function to transform product data into violation format
+function transformToViolations(products, category) {
+  const violations = [];
+  const issues = [
+    "Missing product information",
+    "Incorrect pricing",
+    "Incomplete specifications", 
+    "Missing warranty details",
+    "Inaccurate product description",
+    "Missing safety information",
+    "Incorrect weight/size",
+    "Missing certification details"
+  ];
+  
+  const severities = ["High", "Medium", "Low"];
+  const statuses = ["Open", "Resolved"];
+  const sellers = ["Flipkart", "Amazon", "Myntra", "Nykaa", "BigBasket", "Grofers"];
+  
+  products.forEach((product, index) => {
+    if (product.name && product.price) {
+      violations.push({
+        title: product.name.substring(0, 50) + (product.name.length > 50 ? "..." : ""),
+        seller: sellers[index % sellers.length],
+        issue: issues[index % issues.length],
+        severity: severities[index % severities.length],
+        detected_at: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        status: statuses[index % statuses.length],
+        category: category
+      });
+    }
+  });
+  
+  return violations;
+}
+
+// Load CSV data and create violations
+let violations = [];
+
+// Function to load CSV files
+async function loadCSVData() {
+  try {
+    // Load mobile data
+    const mobileResponse = await fetch('/data/mobile.csv');
+    const mobileText = await mobileResponse.text();
+    const mobileData = parseCSV(mobileText);
+    const mobileViolations = transformToViolations(mobileData.slice(0, 20), "Electronics");
+    
+    // Load laptop data  
+    const laptopResponse = await fetch('/data/laptop.csv');
+    const laptopText = await laptopResponse.text();
+    const laptopData = parseCSV(laptopText);
+    const laptopViolations = transformToViolations(laptopData.slice(0, 15), "Electronics");
+    
+    // Load protein data
+    const proteinResponse = await fetch('/data/protein.csv');
+    const proteinText = await proteinResponse.text();
+    const proteinData = parseCSV(proteinText);
+    const proteinViolations = transformToViolations(proteinData.slice(0, 15), "FMCG");
+    
+    // Combine all violations
+    violations = [...mobileViolations, ...laptopViolations, ...proteinViolations];
+    
+    // Update category filter options
+    updateCategoryFilter();
+    
+    // Render the table with real data
+    renderTable(violations);
+    
+  } catch (error) {
+    console.error('Error loading CSV data:', error);
+    // Fallback to dummy data if CSV loading fails
+    violations = [
+      {title:"Milk Pack 500ml", seller:"DairyMart", issue:"Wrong weight", severity:"High", detected_at:"2025-09-20", status:"Open", category:"FMCG"},
+      {title:"LED TV 32inch", seller:"ElectroShop", issue:"Missing declaration", severity:"Medium", detected_at:"2025-09-18", status:"Resolved", category:"Electronics"},
+      {title:"T-Shirt L", seller:"FashionHub", issue:"Incorrect label", severity:"Low", detected_at:"2025-09-19", status:"Open", category:"Apparel"},
+      {title:"Chocolate Box", seller:"SweetMart", issue:"Wrong price", severity:"Medium", detected_at:"2025-09-21", status:"Open", category:"FMCG"},
+      {title:"Smartphone X", seller:"ElectroShop", issue:"Missing info", severity:"High", detected_at:"2025-09-22", status:"Resolved", category:"Electronics"},
+    ];
+    renderTable(violations);
+  }
+}
+
+// Function to update category filter options based on actual data
+function updateCategoryFilter() {
+  const categoryFilter = document.getElementById("categoryFilter");
+  const categories = [...new Set(violations.map(v => v.category))];
+  
+  // Clear existing options except "All Categories"
+  categoryFilter.innerHTML = '<option value="">All Categories</option>';
+  
+  // Add categories from actual data
+  categories.forEach(category => {
+    const option = document.createElement('option');
+    option.value = category;
+    option.textContent = category;
+    categoryFilter.appendChild(option);
+  });
+}
 
 function renderTable(data){
   const tbody = document.querySelector("#violationTable tbody");
@@ -238,8 +345,8 @@ function applyFilter(){
   renderTable(filtered);
 }
 
-// Initial render
-renderTable(violations);
+// Load CSV data and initialize
+loadCSVData();
 
 function toggleMenu(){
   document.getElementById('nav-links').classList.toggle('show');
