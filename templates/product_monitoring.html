@@ -367,9 +367,67 @@
 
   <!-- Results Section -->
   <div id="results">
-    <div id="sampleResults">
-      <!-- Sample results will be populated by JavaScript -->
+    <div id="sampleResults"></div>
+    {% if results %}
+    <div class="result-card">
+      <h3>Processing Result</h3>
+      {% if results.data %}
+        {% for k,v in results.data.items() %}
+          <p><strong>{{ k }}:</strong> {{ v }}</p>
+        {% endfor %}
+      {% endif %}
+      {% if results.raw_text %}
+        <h4 style="margin-top:12px;">Extracted OCR Text</h4>
+        <pre style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:8px;">{{ results.raw_text }}</pre>
+      {% endif %}
+      {% if results.compare %}
+        <h4 style="margin-top:12px;">CSV Matches (≥ {{ results.compare.threshold }}%)</h4>
+        {% if results.compare.has_match %}
+          <div style="overflow:auto;">
+            <table style="width:100%; border-collapse:collapse;">
+              <thead>
+                <tr>
+                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Name</th>
+                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Price</th>
+                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Score %</th>
+                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for m in results.compare.top_matches %}
+                <tr>
+                  <td style="padding:8px;">{{ m.name }}</td>
+                  <td style="padding:8px;">{{ m.price }}</td>
+                  <td style="padding:8px;">{{ m.score_percent }}</td>
+                  <td style="padding:8px;">{{ m.details[:120] }}{% if m.details and m.details|length > 120 %}...{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>No CSV products matched at the chosen threshold.</p>
+        {% endif %}
+      {% endif %}
+
+      {% if results.filename or results.processed_file %}
+        <div style="display:flex; gap:10px; align-items:flex-start; margin-top:12px;">
+          {% if results.filename %}
+            <div style="flex:0 0 auto; width:32%;">
+              <img data-preview src="/{{ results.filename }}" alt="Captured" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Captured</div>
+            </div>
+          {% endif %}
+          {% if results.processed_file %}
+            <div style="flex:0 0 auto; width:32%;">
+              <img data-preview src="/{{ results.processed_file }}" alt="Processed" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Processed</div>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
     </div>
+    {% endif %}
   </div>
   <script id="serverResultsData" type="application/json">{{ results|tojson if results else 'null' }}</script>
 
@@ -522,29 +580,10 @@ function generateSampleResults(mobileData, laptopData, proteinData) {
   return results;
 }
 
-// Populate sample results
-function populateSampleResults(results) {
-  const container = document.getElementById('sampleResults');
-  container.innerHTML = '';
-  
-  results.forEach(result => {
-    const resultCard = document.createElement('div');
-    resultCard.className = 'result-card';
-    
-    const statusClass = result.status === 'compliant' ? 'compliant' : 'non-compliant';
-    let html = `<h3>${result.title}</h3>`;
-    
-    Object.entries(result.data).forEach(([key, value]) => {
-      html += `<p><strong>${key}:</strong> ${value}</p>`;
-    });
-    
-    resultCard.innerHTML = html;
-    container.appendChild(resultCard);
-  });
-}
+// No-op: demo results removed
+function populateSampleResults(_) {}
 
-// Load sample results when page loads
-loadSampleResults();
+// Removed demo sample results to avoid showing placeholder compliance cards
 
 // -----------------------------
 // Upload Photo: Device/Camera handling
@@ -684,32 +723,26 @@ loadSampleResults();
 // -----------------------------
 // Render server results if provided
 // -----------------------------
-document.addEventListener('DOMContentLoaded', function(){
-  try{
-    const raw = (document.getElementById('serverResultsData') && document.getElementById('serverResultsData').textContent) || 'null';
-    const serverResults = JSON.parse(raw);
-    if(serverResults){
-      const container = document.getElementById('sampleResults');
-      container.innerHTML = '';
-      const card = document.createElement('div');
-      card.className = 'result-card';
-      let html = '<h3>' + (serverResults.compliant ? 'Compliance Status: ✅ Compliant' : 'Compliance Status: ❌ Non-Compliant') + '</h3>';
-      if(serverResults.data){
-        Object.keys(serverResults.data).forEach(function(key){
-          html += '<p><strong>' + key + ':</strong> ' + serverResults.data[key] + '</p>';
-        });
-      }
-      card.innerHTML = html;
-      container.appendChild(card);
-    }
-  }catch(err){
-    console.error('Error rendering server results', err);
-  }
-});
+// Server results are rendered by Jinja; suppress client-side duplication
 </script>
 
-</body>
-</html>
+<!-- Simple image preview modal -->
+<div id="imgModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:2000; align-items:center; justify-content:center;">
+  <img id="imgModalContent" src="" alt="Preview" style="max-width:90vw; max-height:90vh; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.5);" />
+</div>
+
+<script>
+// click-to-zoom for processed/captured images
+document.addEventListener('click', function(e){
+  if(e.target && e.target.matches('img[data-preview]')){
+    const modal = document.getElementById('imgModal');
+    const modalImg = document.getElementById('imgModalContent');
+    modalImg.src = e.target.src;
+    modal.style.display = 'flex';
+  } else if(e.target && (e.target.id === 'imgModal' || e.target.id === 'imgModalContent')){
+    document.getElementById('imgModal').style.display = 'none';
+  }
+});
 </script>
 
 </body>

@@ -5,11 +5,24 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 import pytesseract
 from PIL import Image, ImageDraw, ImageFont
+from PIL import ImageFile, ImageFilter, ImageOps
+from PIL import UnidentifiedImageError
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
 from io import BytesIO
+import difflib
+import re
+
+# Prefer explicit Tesseract path on Windows per user setup
+try:
+    if os.name == 'nt':
+        t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+        if os.path.exists(t_path):
+            pytesseract.pytesseract.tesseract_cmd = t_path
+except Exception as _e:
+    print("Warning: could not set Tesseract path:", _e)
 
 # -----------------------------
 # Flask App Setup
@@ -24,6 +37,9 @@ os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 DB_PATH = "compliance.db"
+
+# Allow loading of truncated images to avoid hard failures on partial uploads
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 # -----------------------------
 # DB Helper
@@ -74,6 +90,79 @@ def create_placeholder_image(path, text):
     w, h = d.textsize(text, font=font)
     d.text(((400-w)/2,(300-h)/2), text, fill=(50,50,50), font=font)
     img.save(path)
+
+# -----------------------------
+# Fuzzy match OCR text to CSV products
+# -----------------------------
+def _normalize_text(value):
+    if not value:
+        return ""
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9\s]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+def find_best_csv_match(ocr_text, products):
+    """Return (best_product, best_score_float_0_to_1). Compares OCR text to product name/details.
+    Uses difflib ratio; not heavy and no extra deps.
+    """
+    if not ocr_text or not products:
+        return None, 0.0
+    ocr_norm = _normalize_text(ocr_text)
+    if not ocr_norm:
+        return None, 0.0
+
+    best = None
+    best_score = 0.0
+    for product in products:
+        name = _normalize_text(product.get('name') or product.get('Product Name') or "")
+        details = _normalize_text(product.get('details') or product.get('Details') or "")
+        combo = (name + " " + details).strip()
+        if not combo:
+            continue
+        score = difflib.SequenceMatcher(None, ocr_norm, combo).ratio()
+        # Also try just name to avoid details noise
+        if name:
+            score = max(score, difflib.SequenceMatcher(None, ocr_norm, name).ratio())
+        if score > best_score:
+            best = product
+            best_score = score
+    return best, best_score
+
+# Return top matches at or above a minimum ratio
+def find_top_csv_matches(ocr_text, products, min_ratio=0.5, limit=5):
+    if not ocr_text or not products:
+        return []
+    ocr_norm = _normalize_text(ocr_text)
+    if not ocr_norm:
+        return []
+
+    scored = []
+    for product in products:
+        name = _normalize_text(product.get('name') or product.get('Product Name') or "")
+        details = _normalize_text(product.get('details') or product.get('Details') or "")
+        combo = (name + " " + details).strip()
+        if not combo:
+            continue
+        score = difflib.SequenceMatcher(None, ocr_norm, combo).ratio()
+        if name:
+            score = max(score, difflib.SequenceMatcher(None, ocr_norm, name).ratio())
+        if score >= min_ratio:
+            scored.append({
+                "product": product,
+                "score": round(score * 100, 2)
+            })
+    # sort by score desc and take top N
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored[:limit]
+
+# -----------------------------
+# Path normalization for URLs
+# -----------------------------
+def to_url_path(p):
+    if not p:
+        return p
+    return p.replace('\\', '/')
 
 # -----------------------------
 # Login Route (Default Page)
@@ -212,9 +301,14 @@ def check_product():
         if img and img.get("src"):
             results["filename"] = img["src"]
 
-        if results["data"]["mrp"] == "Not Found" or results["data"]["country"] == "Not Found":
-            results["compliant"] = False
-            results["data"]["issue"] = "Missing mandatory fields"
+        # Compliance decision: if matched with high confidence, mark compliant; otherwise use missing fields
+        if extracted_data.get("matched_from_csv") and extracted_data.get("match_score", 0) >= 90:
+            results["compliant"] = True
+            results["data"]["compliance_note"] = "Matched product in catalog with high confidence (>=90%)."
+        else:
+            if results["data"]["mrp"] == "Not Found" or results["data"]["country"] == "Not Found":
+                results["compliant"] = False
+                results["data"]["issue"] = "Missing mandatory fields"
 
         run_query('''INSERT INTO products
             (title, brand, seller, category, scanned_at, source_url,
@@ -237,10 +331,44 @@ def check_product():
         filename = secure_filename(image.filename)
         filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         image.save(filepath)
-        results["filename"] = filepath
+        results["filename"] = to_url_path(filepath)
 
-        # OCR
-        text = pytesseract.image_to_string(Image.open(filepath))
+        # Try to open the image robustly
+        try:
+            pil_img = Image.open(filepath)
+            pil_img.load()  # force loading to catch issues early
+        except UnidentifiedImageError:
+            # Gracefully report invalid image and return page
+            results["compliant"] = False
+            results["data"] = {"issue": "Invalid or corrupted image. Please recapture or upload a valid image."}
+            return render_template("product_monitoring.html", results=results)
+        except Exception as _open_e:
+            print('Image open error:', _open_e)
+            results["compliant"] = False
+            results["data"] = {"issue": "Unable to read the uploaded image."}
+            return render_template("product_monitoring.html", results=results)
+
+        # OCR with Pillow-only preprocessing (no OpenCV dependency)
+        try:
+            pil_gray = pil_img.convert('L')
+            w, h = pil_gray.size
+            pil_gray = pil_gray.resize((w*2, h*2))
+            pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
+            pil_autocontrast = ImageOps.autocontrast(pil_blur)
+            # Simple threshold to boost contrast
+            pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
+            text = pytesseract.image_to_string(pil_thresh, config='--oem 3 --psm 6')
+            processed_image_for_save = pil_thresh
+        except Exception as _pe:
+            print('Pillow preprocess error:', _pe)
+            try:
+                text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
+                processed_image_for_save = pil_img
+            except Exception as _pe2:
+                print('OCR fallback error:', _pe2)
+                results["compliant"] = False
+                results["data"] = {"issue": "OCR failed on the uploaded image."}
+                return render_template("product_monitoring.html", results=results)
 
         # Extract data from OCR text and validate against CSV data
         extracted_data = {
@@ -252,18 +380,15 @@ def check_product():
             "care": "care@abc.com" if "@" in text else "Not Found"
         }
         
-        # Try to match with existing products in CSV data
-        matched_product = None
-        for product in all_products:
-            if any(keyword in text.lower() for keyword in product.get('name', '').lower().split()[:3]):
-                matched_product = product
-                break
-        
-        if matched_product:
+        # Try to match with existing products in CSV data (fuzzy >= 0.9)
+        matched_product, match_score = find_best_csv_match(text, all_products)
+        if matched_product and match_score >= 0.90:
+            # Merge best-known fields from CSV
             extracted_data.update({
-                "product": matched_product.get('name', 'Uploaded Product'),
-                "mrp": matched_product.get('price', 'Not Found'),
-                "matched_from_csv": True
+                "product": matched_product.get('name') or matched_product.get('Product Name') or extracted_data.get('product'),
+                "mrp": matched_product.get('price') or matched_product.get('Price') or extracted_data.get('mrp'),
+                "matched_from_csv": True,
+                "match_score": round(match_score * 100, 2)
             })
         
         results["data"] = extracted_data
@@ -273,8 +398,36 @@ def check_product():
             results["data"]["issue"] = "Missing mandatory fields"
 
         processed_path = os.path.join(PROCESSED_FOLDER, "processed_" + filename)
-        Image.open(filepath).save(processed_path)
-        results["processed_file"] = processed_path
+        try:
+            processed_image_for_save.save(processed_path)
+        except Exception as _se:
+            print('Processed save error:', _se)
+            Image.open(filepath).save(processed_path)
+        results["processed_file"] = to_url_path(processed_path)
+        results["raw_text"] = text
+
+        # Compute 50%+ similarity matches across all CSVs
+        try:
+            top_matches = find_top_csv_matches(text, all_products, min_ratio=0.50, limit=5)
+        except Exception as _me:
+            print('Match computation error:', _me)
+            top_matches = []
+
+        # Prepare compact compare summary for UI
+        compare_summary = {
+            "threshold": 50,
+            "has_match": True if top_matches else False,
+            "top_matches": [
+                {
+                    "name": (m["product"].get('name') or m["product"].get('Product Name') or "Unnamed Product"),
+                    "price": (m["product"].get('price') or m["product"].get('Price') or "N/A"),
+                    "details": (m["product"].get('details') or m["product"].get('Details') or ""),
+                    "score_percent": m["score"]
+                }
+                for m in top_matches
+            ]
+        }
+        results["compare"] = compare_summary
 
         run_query('''INSERT INTO products
             (title, brand, seller, category, scanned_at, source_url,
@@ -292,6 +445,57 @@ def check_product():
             run_query('''INSERT INTO violations (product_id, issue, severity, detected_at)
                          VALUES (?, ?, ?, ?)''',
                       (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
+
+        # Append extracted data to CSV log
+        try:
+            csv_log_path = os.path.join("data", "captures.csv")
+            os.makedirs("data", exist_ok=True)
+            file_exists = os.path.exists(csv_log_path)
+            import csv as _csv
+            with open(csv_log_path, mode="a", newline="", encoding="utf-8") as f:
+                writer = _csv.writer(f)
+                if not file_exists:
+                    writer.writerow([
+                        "timestamp","filename","processed_file","product","mrp","net_quantity","manufacturer",
+                        "country","care","compliant","issue","product_id","raw_text_preview"
+                    ])
+                writer.writerow([
+                    datetime.now().isoformat(),
+                    results.get("filename"),
+                    results.get("processed_file"),
+                    results["data"].get("product"),
+                    results["data"].get("mrp"),
+                    results["data"].get("net_quantity"),
+                    results["data"].get("manufacturer"),
+                    results["data"].get("country"),
+                    results["data"].get("care"),
+                    results.get("compliant"),
+                    results["data"].get("issue"),
+                    product_id,
+                    (text[:200] if text else None)
+                ])
+        except Exception as e:
+            print("CSV log write error:", e)
+
+        # Write full extracted text to a dedicated CSV log
+        try:
+            extracted_csv_path = os.path.join("data", "extracted_texts.csv")
+            os.makedirs("data", exist_ok=True)
+            file_exists_et = os.path.exists(extracted_csv_path)
+            import csv as _csv
+            with open(extracted_csv_path, mode="a", newline="", encoding="utf-8") as f:
+                writer = _csv.writer(f)
+                if not file_exists_et:
+                    writer.writerow(["timestamp", "filename", "processed_file", "product_id", "full_text"]) 
+                writer.writerow([
+                    datetime.now().isoformat(),
+                    results.get("filename"),
+                    results.get("processed_file"),
+                    product_id,
+                    text
+                ])
+        except Exception as e:
+            print("Extracted text CSV write error:", e)
 
     return render_template("product_monitoring.html", results=results)
 
