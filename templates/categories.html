@@ -84,10 +84,35 @@
   .filters button:hover { background:#1d2659; }
 
   /* Table */
-  table { width:100%; border-collapse:collapse; background:white; border-radius:8px; overflow:hidden; }
-  th,td { padding:10px; border-bottom:1px solid #ddd; text-align:left; }
-  th { background:#A8D0E6; color:#333; }
+  table { width:100%; border-collapse:collapse; background:white; border-radius:8px; overflow:hidden; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+  th,td { padding:12px; border-bottom:1px solid #ddd; text-align:left; }
+  th { background:#A8D0E6; color:#333; font-weight:bold; }
   tr:hover { background:#f1f1f1; transition:0.3s; }
+  tr:nth-child(even) { background:#f9f9f9; }
+  
+  /* Responsive table */
+  @media(max-width:768px){
+    table, thead, tbody, th, td, tr { display: block; }
+    thead tr { position: absolute; top: -9999px; left: -9999px; }
+    tr { border: 1px solid #ccc; margin-bottom: 10px; padding: 10px; }
+    td { border: none; position: relative; padding-left: 50%; }
+    td:before { content: attr(data-label); position: absolute; left: 6px; width: 45%; padding-right: 10px; white-space: nowrap; font-weight: bold; }
+  }
+
+  /* Category Dropdown */
+  #categoryDropdown {
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  #categoryDropdown:hover {
+    box-shadow: 0 4px 8px rgba(47, 60, 126, 0.2);
+    border-color: #1d2659;
+  }
+  #categoryDropdown:focus {
+    outline: none;
+    border-color: #1d2659;
+    box-shadow: 0 0 0 3px rgba(47, 60, 126, 0.1);
+  }
 
   /* Footer */
   footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:20px; border-radius:12px; }
@@ -141,69 +166,158 @@
 <div class="content" id="cardsSection">
   <!-- Top Cards -->
   <div class="cards">
-    <div class="card"><h2>5</h2><p>Total Categories</p></div>
-    <div class="card"><h2>12</h2><p>Total Brands</p></div>
-    <div class="card"><h2>FMCG</h2><p>Most Violated Category</p></div>
-    <div class="card"><h2>ElectroShop</h2><p>Most Violated Brand</p></div>
+    <div class="card"><h2>3</h2><p>Total Categories</p></div>
+    <div class="card"><h2>{{ (laptop_products|length + mobile_products|length + protein_products|length) }}</h2><p>Total Products</p></div>
+
   </div>
 
-  <!-- Filters -->
+  <!-- Category Selection and Filters -->
   <div class="filters">
-    <form>
-      <input type="text" placeholder="Search Category">
-      <input type="text" placeholder="Search Brand">
-      <select>
-        <option value="">All Violations</option>
-        <option value="1">1+</option>
-        <option value="5">5+</option>
-        <option value="10">10+</option>
-      </select>
-      <button type="submit">Filter</button>
-    </form>
+    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+      <!-- Category Selection Dropdown -->
+      <div style="position: relative; min-width: 200px;">
+        <select id="categoryDropdown" onchange="showCategory(this.value)" 
+                style="width: 100%; padding: 12px 40px 12px 15px; border: 2px solid #2F3C7E; background: white; color: #2F3C7E; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; appearance: none; background-image: url('data:image/svg+xml;charset=US-ASCII,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4 5\"><path fill=\"%232F3C7E\" d=\"M2 0L0 2h4zm0 5L0 3h4z\"/></svg>'); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px;">
+          <option value="all">All Categories</option>
+          <option value="laptop">Electronics - Laptops </option>
+          <option value="mobile">Electronics - Mobiles</option>
+          <option value="protein">FMCG - Protein </option>
+        </select>
+      </div>
+      
+      <!-- Search Form -->
+      <form method="POST" action="{{ url_for('search_products') }}" style="display: flex; gap: 10px; align-items: center;">
+        <input type="text" name="search_term" placeholder="Search within selected category" value="{{ search_term or '' }}" 
+               style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 5px; min-width: 250px;">
+        <input type="hidden" name="category" id="selected_category" value="{{ selected_category or 'all' }}">
+        <button type="submit" style="padding: 8px 16px; background: #2F3C7E; color: white; border: none; border-radius: 5px; cursor: pointer;">
+          Search
+        </button>
+      </form>
+    </div>
   </div>
+
+  <!-- Category Info -->
+  <div id="categoryInfo" style="background:linear-gradient(135deg, #2F3C7E, #70C1B3); color:white; padding:20px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.15); margin-bottom:20px;">
+    <h3 id="categoryTitle" style="margin:0 0 10px 0; font-size:24px;">All Categories</h3>
+    <p id="categoryCount" style="margin:0; font-size:16px; opacity:0.9;">Showing all {{ (laptop_products|length + mobile_products|length + protein_products|length) }} products</p>
+  </div>
+
+  <!-- Search Results -->
+  {% if search_results and search_term and search_term.strip() %}
+  <div style="background:white; padding:15px; border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,0.1); margin-bottom:20px;">
+    <h3>Search Results ({{ search_results|length }} found)</h3>
+    <p>Search term: "{{ search_term }}" in {{ selected_category }} category</p>
+  </div>
+  {% endif %}
+
 
   <!-- Table -->
-  <table>
+  <table id="productsTable">
     <tr>
       <th>Category</th>
-      <th>Brand</th>
-      <th>Products Monitored</th>
-      <th>Violations Found</th>
-      <th>Compliance %</th>
-      <th>Last Violation Detected</th>
+      <th>Product Name</th>
+      <th>Price</th>
+      <th>Details</th>
+      <th>Image</th>
+      <th>Product Link</th>
     </tr>
+    
+    <!-- Laptop Products -->
+    <tbody id="laptop-products" class="category-section">
+    {% for product in laptop_products %}
     <tr>
-      <td>FMCG</td>
-      <td>DairyMart</td>
-      <td>25</td>
-      <td>5</td>
-      <td>80%</td>
-      <td>2025-09-22</td>
+      <td>Laptop</td>
+      <td>{{ product.name[:50] }}{% if product.name|length > 50 %}...{% endif %}</td>
+      <td>{{ product.price }}</td>
+      <td>{{ product.details[:100] }}{% if product.details|length > 100 %}...{% endif %}</td>
+      <td><img src="{{ product.image_url }}" alt="Product Image" style="width:50px; height:50px; object-fit:cover; border-radius:5px;" onerror="this.style.display='none'"></td>
+      <td><a href="{{ product.product_link }}" target="_blank" style="color:#2F3C7E; text-decoration:none;">View Product</a></td>
     </tr>
+    {% endfor %}
+    </tbody>
+    
+    <!-- Mobile Products -->
+    <tbody id="mobile-products" class="category-section">
+    {% for product in mobile_products %}
     <tr>
-      <td>Electronics</td>
-      <td>ElectroShop</td>
-      <td>15</td>
-      <td>3</td>
-      <td>80%</td>
-      <td>2025-09-21</td>
+      <td>Mobile</td>
+      <td>{{ product.name[:50] }}{% if product.name|length > 50 %}...{% endif %}</td>
+      <td>{{ product.price }}</td>
+      <td>{{ product.details[:100] }}{% if product.details|length > 100 %}...{% endif %}</td>
+      <td><img src="{{ product.image_url }}" alt="Product Image" style="width:50px; height:50px; object-fit:cover; border-radius:5px;" onerror="this.style.display='none'"></td>
+      <td><a href="{{ product.product_link }}" target="_blank" style="color:#2F3C7E; text-decoration:none;">View Product</a></td>
     </tr>
+    {% endfor %}
+    </tbody>
+    
+    <!-- Protein Products -->
+    <tbody id="protein-products" class="category-section">
+    {% for product in protein_products %}
     <tr>
-      <td>Apparel</td>
-      <td>FashionHub</td>
-      <td>10</td>
-      <td>1</td>
-      <td>90%</td>
-      <td>2025-09-19</td>
+      <td>Protein</td>
+      <td>{{ product['Product Name'][:50] }}{% if product['Product Name']|length > 50 %}...{% endif %}</td>
+      <td>{{ product.Price }}</td>
+      <td>{{ product['Sales Package'][:100] }}{% if product['Sales Package']|length > 100 %}...{% endif %}</td>
+      <td><img src="{{ product.Image }}" alt="Product Image" style="width:50px; height:50px; object-fit:cover; border-radius:5px;" onerror="this.style.display='none'"></td>
+      <td><a href="{{ product['Product Link'] }}" target="_blank" style="color:#2F3C7E; text-decoration:none;">View Product</a></td>
     </tr>
-    <tr>
-      <td>FMCG</td>
-      <td>SweetMart</td>
-      <td>12</td>
-      <td>4</td>
-      <td>67%</td>
-      <td>2025-09-20</td>
+    {% endfor %}
+    </tbody>
+    
+    <!-- Search Results -->
+    {% if search_results and search_term and search_term.strip() %}
+    {% for product in search_results %}
+    <tr style="background-color:#f0f8ff;">
+      <td>
+        {% if 'name' in product and 'image_url' in product %}
+          Laptop
+        {% elif 'name' in product and 'image_url' in product %}
+          Mobile
+        {% else %}
+          Protein
+        {% endif %}
+      </td>
+      <td>
+        {% if 'name' in product %}
+          {{ product.name[:50] }}{% if product.name|length > 50 %}...{% endif %}
+        {% else %}
+          {{ product['Product Name'][:50] }}{% if product['Product Name']|length > 50 %}...{% endif %}
+        {% endif %}
+      </td>
+      <td>
+        {% if 'price' in product %}
+          {{ product.price }}
+        {% else %}
+          {{ product.Price }}
+        {% endif %}
+      </td>
+      <td>
+        {% if 'details' in product %}
+          {{ product.details[:100] }}{% if product.details|length > 100 %}...{% endif %}
+        {% elif 'Sales Package' in product %}
+          {{ product['Sales Package'][:100] }}{% if product['Sales Package']|length > 100 %}...{% endif %}
+        {% else %}
+          No details available
+        {% endif %}
+      </td>
+      <td>
+        {% if 'image_url' in product %}
+          <img src="{{ product.image_url }}" alt="Product Image" style="width:50px; height:50px; object-fit:cover; border-radius:5px;" onerror="this.style.display='none'">
+        {% else %}
+          <img src="{{ product.Image }}" alt="Product Image" style="width:50px; height:50px; object-fit:cover; border-radius:5px;" onerror="this.style.display='none'">
+        {% endif %}
+      </td>
+      <td>
+        {% if 'product_link' in product %}
+          <a href="{{ product.product_link }}" target="_blank" style="color:#2F3C7E; text-decoration:none;">View Product</a>
+        {% else %}
+          <a href="{{ product['Product Link'] }}" target="_blank" style="color:#2F3C7E; text-decoration:none;">View Product</a>
+        {% endif %}
+      </td>
     </tr>
+    {% endfor %}
+    {% endif %}
   </table>
 
   <!-- Chart -->
@@ -229,23 +343,108 @@ window.onclick = function(event){
   }
 }
 
+// Category selection functionality
+function showCategory(category) {
+  // Update dropdown selection
+  const dropdown = document.getElementById('categoryDropdown');
+  if (dropdown) {
+    dropdown.value = category;
+  }
+  
+  // Update hidden input for search form
+  document.getElementById('selected_category').value = category;
+  
+  // Show/hide table sections
+  const sections = document.querySelectorAll('.category-section');
+  sections.forEach(section => {
+    section.style.display = 'none';
+  });
+  
+  // Hide search results if any
+  const searchRows = document.querySelectorAll('tr[style*="background-color:#f0f8ff"]');
+  searchRows.forEach(row => {
+    row.style.display = 'none';
+  });
+  
+  if (category === 'all') {
+    sections.forEach(section => {
+      section.style.display = 'table-row-group';
+    });
+  } else {
+    const targetSection = document.getElementById(`${category}-products`);
+    if (targetSection) {
+      targetSection.style.display = 'table-row-group';
+    }
+  }
+  
+  // Update search placeholder
+  const searchInput = document.querySelector('input[name="search_term"]');
+  if (category === 'all') {
+    searchInput.placeholder = 'Search all products...';
+  } else {
+    const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
+    searchInput.placeholder = `Search ${categoryName} products...`;
+  }
+  
+  // Update category info section
+  const categoryTitle = document.getElementById('categoryTitle');
+  const categoryCount = document.getElementById('categoryCount');
+  
+  if (category === 'all') {
+    categoryTitle.textContent = 'All Categories';
+    categoryCount.textContent = 'Showing all {{ (laptop_products|length + mobile_products|length + protein_products|length) }} products';
+  } else {
+    const categoryName = category.charAt(0).toUpperCase() + category.slice(1);
+    categoryTitle.textContent = `${categoryName} Products`;
+    
+    let count = 0;
+    if (category === 'laptop') count = {{ laptop_products|length }};
+    else if (category === 'mobile') count = {{ mobile_products|length }};
+    else if (category === 'protein') count = {{ protein_products|length }};
+    
+    categoryCount.textContent = `Showing ${count} ${categoryName.toLowerCase()} products`;
+  }
+  
+  // Scroll to table to show the selected products
+  document.getElementById('productsTable').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Initialize page - show all categories by default
+document.addEventListener('DOMContentLoaded', function() {
+  showCategory('all');
+});
+
 // Chart.js example (simple bar chart)
 const ctx = document.getElementById('catBrandChart').getContext('2d');
 const catBrandChart = new Chart(ctx, {
   type: 'bar',
   data: {
-    labels: ['FMCG','Electronics','Apparel','FMCG'],
+    labels: ['Laptops','Mobiles','Protein'],
     datasets: [{
-      label: 'Violations Found',
-      data: [5,3,1,4],
-      backgroundColor: '#DB5A5A'
-    },{
-      label: 'Products Monitored',
-      data: [25,15,10,12],
-      backgroundColor: '#2F3C7E'
+      label: 'Products Available',
+      data: [{{ laptop_products|length }}, {{ mobile_products|length }}, {{ protein_products|length }}],
+      backgroundColor: ['#2F3C7E', '#70C1B3', '#DB5A5A']
     }]
   },
-  options: { responsive:true, plugins:{ legend:{ position:'top' } } }
+  options: { 
+    responsive: true, 
+    plugins: { 
+      legend: { position: 'top' },
+      title: {
+        display: true,
+        text: 'Product Categories Distribution'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: {
+          display: true,
+          text: 'Number of Products'
+        }
+      }
+    }
+  }
 });
 </script>
 </body>
