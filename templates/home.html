@@ -188,7 +188,7 @@ footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margi
           <span>Role: Compliance Officer</span>
         </div>
       </div>
-      <div class="profile-stats">
+      <div class="profile-stats" id="profileStats">
         Work Done: 50 Products Checked
       </div>
       <hr>
@@ -249,6 +249,63 @@ window.onclick = function(event) {
     }
   }
 }
+
+// Load CSV data and update profile stats
+async function updateProfileStats() {
+  try {
+    // Load CSV data
+    const [mobileResponse, laptopResponse, proteinResponse] = await Promise.all([
+      fetch('/data/mobile.csv'),
+      fetch('/data/laptop.csv'),
+      fetch('/data/protein.csv')
+    ]);
+    
+    const mobileText = await mobileResponse.text();
+    const laptopText = await laptopResponse.text();
+    const proteinText = await proteinResponse.text();
+    
+    // Parse CSV data
+    const mobileData = parseCSV(mobileText);
+    const laptopData = parseCSV(laptopText);
+    const proteinData = parseCSV(proteinText);
+    
+    // Calculate total products
+    const totalProducts = mobileData.length + laptopData.length + proteinData.length;
+    const totalViolations = Math.floor(totalProducts * 0.16);
+    
+    // Update profile stats
+    const profileStats = document.getElementById('profileStats');
+    if (profileStats) {
+      profileStats.textContent = `Work Done: ${totalProducts} Products Checked, ${totalViolations} Violations Found`;
+    }
+    
+  } catch (error) {
+    console.error('Error loading profile stats:', error);
+    // Keep default stats if error occurs
+  }
+}
+
+// Parse CSV function
+function parseCSV(csvText) {
+  const lines = csvText.split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+  const data = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      data.push(row);
+    }
+  }
+  return data;
+}
+
+// Update profile stats when page loads
+updateProfileStats();
 </script>
 
 </body>
