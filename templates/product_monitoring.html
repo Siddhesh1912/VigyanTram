@@ -142,6 +142,96 @@
   .compliant { color:green; font-weight:bold; }
   .non-compliant { color:red; font-weight:bold; }
 
+  /* Category Products Section */
+  .category-product-card {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    border-left: 5px solid #2F3C7E;
+    transition: transform 0.3s;
+  }
+  .category-product-card:hover { transform: translateY(-3px); }
+  .product-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+  }
+  .product-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #2F3C7E;
+    margin: 0;
+  }
+  .compliance-status {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 14px;
+  }
+  .status-compliant {
+    background: #d4edda;
+    color: #155724;
+  }
+  .status-non-compliant {
+    background: #f8d7da;
+    color: #721c24;
+  }
+  .product-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-bottom: 15px;
+  }
+  .detail-item {
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-label {
+    font-weight: bold;
+    color: #555;
+    font-size: 12px;
+    margin-bottom: 5px;
+  }
+  .detail-value {
+    color: #333;
+    font-size: 14px;
+  }
+  .violations-list {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+  }
+  .violation-item {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 14px;
+  }
+  .violation-item:last-child {
+    margin-bottom: 0;
+  }
+  .report-button {
+    background: #DB5A5A;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.3s;
+    font-size: 14px;
+  }
+  .report-button:hover {
+    background: #a63b3b;
+    transform: translateY(-2px);
+  }
+
   /* Footer */
   footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:20px; }
 </style>
@@ -151,6 +241,7 @@
 <!-- Navbar -->
 <div class="navbar">
   <h2>Vigyantram</h2>
+  
   <span class="menu-toggle" onclick="toggleMenu()">☰</span>
   <ul id="nav-links">
     <li><a href="/">Home</a></li>
@@ -199,9 +290,9 @@
     <!-- Card 1: Category + Time -->
     <div class="card">
       <h2>Choose Category & Time</h2>
-      <form>
+      <form id="categoryTimeForm">
         <label for="category">Category:</label>
-        <select id="category" name="category">
+        <select id="category" name="category" onchange="loadCategoryProducts()">
           <option value="">All Categories</option>
           <option value="protein">Protein</option>
           <option value="mobile">Mobile</option>
@@ -209,14 +300,14 @@
         </select>
 
         <label for="time">Time Filter:</label>
-        <select id="time" name="time">
+        <select id="time" name="time" onchange="loadCategoryProducts()">
           <option value="">All Time</option>
           <option value="latest">Latest</option>
           <option value="1_month">1 Month Ago</option>
           <option value="3_months">3 Months Ago</option>
         </select>
 
-        <button type="submit">Check Compliance</button>
+        <button type="button" onclick="loadCategoryProducts()">Check Compliance</button>
       </form>
     </div>
 
@@ -242,22 +333,18 @@
 
   </div>
 
+  <!-- Category Products Section -->
+  <div id="categoryResults" style="display: none;">
+    <h3 id="categoryResultsTitle">Category Products</h3>
+    <div id="categoryProductsList">
+      <!-- Category products will be populated by JavaScript -->
+    </div>
+  </div>
+
   <!-- Results Section -->
   <div id="results">
-    <div class="result-card">
-      <h3>Compliance Status: <span class="compliant">✅ Compliant</span></h3>
-      <p><strong>Source URL:</strong> https://example.com/product/12345</p>
-      <p><strong>MRP:</strong> ₹499</p>
-      <p><strong>Net Quantity:</strong> 500g</p>
-      <p><strong>Manufacturer:</strong> Example Manufacturer</p>
-      <p><strong>Country of Origin:</strong> India</p>
-      <p><strong>Consumer Care:</strong> 1800-123-456</p>
-    </div>
-
-    <div class="result-card">
-      <h3>Compliance Status: <span class="non-compliant">❌ Non-Compliant</span></h3>
-      <p><strong>Source URL:</strong> https://example.com/product/67890</p>
-      <p><strong>Issue:</strong> MRP missing on label</p>
+    <div id="sampleResults">
+      <!-- Sample results will be populated by JavaScript -->
     </div>
   </div>
 
@@ -298,6 +385,264 @@ window.onclick = function(event) {
     }
   }
 }
+
+// Load CSV data and populate sample results
+async function loadSampleResults() {
+  try {
+    // Load CSV data
+    const [mobileResponse, laptopResponse, proteinResponse] = await Promise.all([
+      fetch('/data/mobile.csv'),
+      fetch('/data/laptop.csv'),
+      fetch('/data/protein.csv')
+    ]);
+    
+    const mobileText = await mobileResponse.text();
+    const laptopText = await laptopResponse.text();
+    const proteinText = await proteinResponse.text();
+    
+    // Parse CSV data
+    const mobileData = parseCSV(mobileText);
+    const laptopData = parseCSV(laptopText);
+    const proteinData = parseCSV(proteinText);
+    
+    // Generate sample results
+    const sampleResults = generateSampleResults(mobileData, laptopData, proteinData);
+    populateSampleResults(sampleResults);
+    
+  } catch (error) {
+    console.error('Error loading sample results:', error);
+    // Fallback to default results
+    populateSampleResults([
+      {
+        status: 'compliant',
+        title: 'Compliance Status: ✅ Compliant',
+        data: {
+          'Source URL': 'https://example.com/product/12345',
+          'MRP': '₹499',
+          'Net Quantity': '500g',
+          'Manufacturer': 'Example Manufacturer',
+          'Country of Origin': 'India',
+          'Consumer Care': '1800-123-456'
+        }
+      },
+      {
+        status: 'non-compliant',
+        title: 'Compliance Status: ❌ Non-Compliant',
+        data: {
+          'Source URL': 'https://example.com/product/67890',
+          'Issue': 'MRP missing on label'
+        }
+      }
+    ]);
+  }
+}
+
+// Parse CSV function
+function parseCSV(csvText) {
+  const lines = csvText.split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+  const data = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      data.push(row);
+    }
+  }
+  return data;
+}
+
+// Generate sample results from CSV data
+function generateSampleResults(mobileData, laptopData, proteinData) {
+  const results = [];
+  
+  // Sample compliant result from mobile data
+  if (mobileData.length > 0) {
+    const mobile = mobileData[0];
+    results.push({
+      status: 'compliant',
+      title: 'Compliance Status: ✅ Compliant',
+      data: {
+        'Product Name': mobile.name ? mobile.name.substring(0, 50) + '...' : 'Sample Mobile Product',
+        'Source URL': mobile.product_link || 'https://example.com/mobile/12345',
+        'Price': mobile.price || '₹12,999',
+        'Details': mobile.details ? mobile.details.substring(0, 100) + '...' : 'Mobile phone specifications',
+        'Manufacturer': 'Samsung',
+        'Country of Origin': 'India',
+        'Consumer Care': '1800-123-456'
+      }
+    });
+  }
+  
+  // Sample non-compliant result from protein data
+  if (proteinData.length > 0) {
+    const protein = proteinData[0];
+    results.push({
+      status: 'non-compliant',
+      title: 'Compliance Status: ❌ Non-Compliant',
+      data: {
+        'Product Name': protein['Product Name'] ? protein['Product Name'].substring(0, 50) + '...' : 'Sample Protein Product',
+        'Source URL': protein['Product Link'] || 'https://example.com/protein/67890',
+        'Price': protein.Price || '₹509',
+        'Issue': 'Missing mandatory product information',
+        'Details': 'Product lacks required compliance declarations'
+      }
+    });
+  }
+  
+  return results;
+}
+
+// Populate sample results
+function populateSampleResults(results) {
+  const container = document.getElementById('sampleResults');
+  container.innerHTML = '';
+  
+  results.forEach(result => {
+    const resultCard = document.createElement('div');
+    resultCard.className = 'result-card';
+    
+    const statusClass = result.status === 'compliant' ? 'compliant' : 'non-compliant';
+    let html = `<h3>${result.title}</h3>`;
+    
+    Object.entries(result.data).forEach(([key, value]) => {
+      html += `<p><strong>${key}:</strong> ${value}</p>`;
+    });
+    
+    resultCard.innerHTML = html;
+    container.appendChild(resultCard);
+  });
+}
+
+// Load sample results when page loads
+loadSampleResults();
+</script>
+
+</body>
+</html>
+    const mobileData = parseCSV(mobileText);
+    const laptopData = parseCSV(laptopText);
+    const proteinData = parseCSV(proteinText);
+    
+    // Generate sample results
+    const sampleResults = generateSampleResults(mobileData, laptopData, proteinData);
+    populateSampleResults(sampleResults);
+    
+  } catch (error) {
+    console.error('Error loading sample results:', error);
+    // Fallback to default results
+    populateSampleResults([
+      {
+        status: 'compliant',
+        title: 'Compliance Status: ✅ Compliant',
+        data: {
+          'Source URL': 'https://example.com/product/12345',
+          'MRP': '₹499',
+          'Net Quantity': '500g',
+          'Manufacturer': 'Example Manufacturer',
+          'Country of Origin': 'India',
+          'Consumer Care': '1800-123-456'
+        }
+      },
+      {
+        status: 'non-compliant',
+        title: 'Compliance Status: ❌ Non-Compliant',
+        data: {
+          'Source URL': 'https://example.com/product/67890',
+          'Issue': 'MRP missing on label'
+        }
+      }
+    ]);
+  }
+}
+
+// Parse CSV function
+function parseCSV(csvText) {
+  const lines = csvText.split('\n');
+  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
+  const data = [];
+  
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim()) {
+      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
+      const row = {};
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      data.push(row);
+    }
+  }
+  return data;
+}
+
+// Generate sample results from CSV data
+function generateSampleResults(mobileData, laptopData, proteinData) {
+  const results = [];
+  
+  // Sample compliant result from mobile data
+  if (mobileData.length > 0) {
+    const mobile = mobileData[0];
+    results.push({
+      status: 'compliant',
+      title: 'Compliance Status: ✅ Compliant',
+      data: {
+        'Product Name': mobile.name ? mobile.name.substring(0, 50) + '...' : 'Sample Mobile Product',
+        'Source URL': mobile.product_link || 'https://example.com/mobile/12345',
+        'Price': mobile.price || '₹12,999',
+        'Details': mobile.details ? mobile.details.substring(0, 100) + '...' : 'Mobile phone specifications',
+        'Manufacturer': 'Samsung',
+        'Country of Origin': 'India',
+        'Consumer Care': '1800-123-456'
+      }
+    });
+  }
+  
+  // Sample non-compliant result from protein data
+  if (proteinData.length > 0) {
+    const protein = proteinData[0];
+    results.push({
+      status: 'non-compliant',
+      title: 'Compliance Status: ❌ Non-Compliant',
+      data: {
+        'Product Name': protein['Product Name'] ? protein['Product Name'].substring(0, 50) + '...' : 'Sample Protein Product',
+        'Source URL': protein['Product Link'] || 'https://example.com/protein/67890',
+        'Price': protein.Price || '₹509',
+        'Issue': 'Missing mandatory product information',
+        'Details': 'Product lacks required compliance declarations'
+      }
+    });
+  }
+  
+  return results;
+}
+
+// Populate sample results
+function populateSampleResults(results) {
+  const container = document.getElementById('sampleResults');
+  container.innerHTML = '';
+  
+  results.forEach(result => {
+    const resultCard = document.createElement('div');
+    resultCard.className = 'result-card';
+    
+    const statusClass = result.status === 'compliant' ? 'compliant' : 'non-compliant';
+    let html = `<h3>${result.title}</h3>`;
+    
+    Object.entries(result.data).forEach(([key, value]) => {
+      html += `<p><strong>${key}:</strong> ${value}</p>`;
+    });
+    
+    resultCard.innerHTML = html;
+    container.appendChild(resultCard);
+  });
+}
+
+// Load sample results when page loads
+loadSampleResults();
 </script>
 
 </body>
