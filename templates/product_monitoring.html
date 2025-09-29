@@ -324,10 +324,34 @@
     <!-- Card 3: Upload Photo -->
     <div class="card">
       <h2>Upload Product Photo</h2>
-      <form enctype="multipart/form-data">
-        <label for="image">Select Image:</label>
-        <input type="file" id="image" name="image">
-        <button type="submit">Check Compliance</button>
+      <form id="photoForm" action="/check_product" method="POST" enctype="multipart/form-data">
+        <label for="sourceSelect">Image Source:</label>
+        <select id="sourceSelect" name="source">
+          <option value="device" selected>Choose from device</option>
+          <option value="camera">Capture from camera</option>
+        </select>
+
+        <div id="devicePicker">
+          <label for="image">Select Image:</label>
+          <input type="file" id="image" name="image" accept="image/*">
+        </div>
+
+        <div id="cameraSection" style="display:none;">
+          <label>Camera:</label>
+          <video id="cameraStream" autoplay playsinline style="width:100%; border-radius:8px; background:#000;"></video>
+          <div style="display:flex; gap:10px; margin-top:10px;">
+            <button type="button" id="startCameraBtn">Start Camera</button>
+            <button type="button" id="captureBtn" disabled>Capture</button>
+            <button type="button" id="recaptureBtn" style="display:none;">Re-capture</button>
+          </div>
+        </div>
+
+        <div id="previewSection" style="display:none; margin-top:10px;">
+          <label>Preview:</label>
+          <img id="previewImg" alt="Preview" style="width:100%; max-height:260px; object-fit:contain; border:1px solid #eee; border-radius:8px;" />
+        </div>
+
+        <button id="checkBtn" type="submit">Check Compliance</button>
       </form>
     </div>
 
@@ -347,6 +371,7 @@
       <!-- Sample results will be populated by JavaScript -->
     </div>
   </div>
+  <script id="serverResultsData" type="application/json">{{ results|tojson if results else 'null' }}</script>
 
   <!-- Download Report Button -->
 <div class="result-card" style="text-align:center; margin-top:20px;">
@@ -520,129 +545,171 @@ function populateSampleResults(results) {
 
 // Load sample results when page loads
 loadSampleResults();
+
+// -----------------------------
+// Upload Photo: Device/Camera handling
+// -----------------------------
+(function(){
+  const sourceSelect = document.getElementById('sourceSelect');
+  const devicePicker = document.getElementById('devicePicker');
+  const fileInput = document.getElementById('image');
+  const cameraSection = document.getElementById('cameraSection');
+  const videoEl = document.getElementById('cameraStream');
+  const startBtn = document.getElementById('startCameraBtn');
+  const captureBtn = document.getElementById('captureBtn');
+  const recaptureBtn = document.getElementById('recaptureBtn');
+  const previewSection = document.getElementById('previewSection');
+  const previewImg = document.getElementById('previewImg');
+  const form = document.getElementById('photoForm');
+
+  let mediaStream = null;
+  let capturedBlob = null;
+
+  function stopCamera(){
+    if(mediaStream){
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+    if(videoEl){
+      videoEl.srcObject = null;
+    }
+    captureBtn.disabled = true;
+  }
+
+  function showPreviewFromFile(file){
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      previewImg.src = e.target.result;
+      previewSection.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function startCamera(){
+    try{
+      stopCamera();
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      videoEl.srcObject = mediaStream;
+      captureBtn.disabled = false;
+      recaptureBtn.style.display = 'none';
+      previewSection.style.display = 'none';
+      capturedBlob = null;
+    }catch(err){
+      alert('Unable to access camera. Please allow permissions or use device upload.');
+      console.error(err);
+    }
+  }
+
+  function dataURLToFile(dataUrl, filename){
+    const arr = dataUrl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+    return new File([u8arr], filename, { type: mime });
+  }
+
+  function assignFileToInput(file){
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+  }
+
+  async function capturePhoto(){
+    const video = videoEl;
+    const canvas = document.createElement('canvas');
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    previewImg.src = dataUrl;
+    previewSection.style.display = 'block';
+    // Create a File and set into the file input so form submit works normally
+    const file = dataURLToFile(dataUrl, 'capture.jpg');
+    assignFileToInput(file);
+    capturedBlob = file;
+    recaptureBtn.style.display = 'inline-block';
+    // Optional: stop camera after capture
+    stopCamera();
+  }
+
+  function recapture(){
+    capturedBlob = null;
+    previewSection.style.display = 'none';
+    startCamera();
+  }
+
+  function onSourceChange(){
+    const src = sourceSelect.value;
+    if(src === 'device'){
+      cameraSection.style.display = 'none';
+      stopCamera();
+      devicePicker.style.display = 'block';
+      recaptureBtn.style.display = 'none';
+    } else {
+      devicePicker.style.display = 'none';
+      cameraSection.style.display = 'block';
+    }
+  }
+
+  // Event bindings
+  if(sourceSelect){ sourceSelect.addEventListener('change', onSourceChange); }
+  if(startBtn){ startBtn.addEventListener('click', startCamera); }
+  if(captureBtn){ captureBtn.addEventListener('click', capturePhoto); }
+  if(recaptureBtn){ recaptureBtn.addEventListener('click', recapture); }
+  if(fileInput){ fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    showPreviewFromFile(f);
+  }); }
+
+  if(form){
+    form.addEventListener('submit', function(e){
+      // If camera selected but nothing captured yet, block submit
+      if(sourceSelect && sourceSelect.value === 'camera' && !fileInput.files.length){
+        e.preventDefault();
+        alert('Please capture a photo first.');
+        return false;
+      }
+    });
+  }
+
+  // Initialize UI state
+  onSourceChange();
+})();
+
+// -----------------------------
+// Render server results if provided
+// -----------------------------
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    const raw = (document.getElementById('serverResultsData') && document.getElementById('serverResultsData').textContent) || 'null';
+    const serverResults = JSON.parse(raw);
+    if(serverResults){
+      const container = document.getElementById('sampleResults');
+      container.innerHTML = '';
+      const card = document.createElement('div');
+      card.className = 'result-card';
+      let html = '<h3>' + (serverResults.compliant ? 'Compliance Status: ✅ Compliant' : 'Compliance Status: ❌ Non-Compliant') + '</h3>';
+      if(serverResults.data){
+        Object.keys(serverResults.data).forEach(function(key){
+          html += '<p><strong>' + key + ':</strong> ' + serverResults.data[key] + '</p>';
+        });
+      }
+      card.innerHTML = html;
+      container.appendChild(card);
+    }
+  }catch(err){
+    console.error('Error rendering server results', err);
+  }
+});
 </script>
 
 </body>
 </html>
-    const mobileData = parseCSV(mobileText);
-    const laptopData = parseCSV(laptopText);
-    const proteinData = parseCSV(proteinText);
-    
-    // Generate sample results
-    const sampleResults = generateSampleResults(mobileData, laptopData, proteinData);
-    populateSampleResults(sampleResults);
-    
-  } catch (error) {
-    console.error('Error loading sample results:', error);
-    // Fallback to default results
-    populateSampleResults([
-      {
-        status: 'compliant',
-        title: 'Compliance Status: ✅ Compliant',
-        data: {
-          'Source URL': 'https://example.com/product/12345',
-          'MRP': '₹499',
-          'Net Quantity': '500g',
-          'Manufacturer': 'Example Manufacturer',
-          'Country of Origin': 'India',
-          'Consumer Care': '1800-123-456'
-        }
-      },
-      {
-        status: 'non-compliant',
-        title: 'Compliance Status: ❌ Non-Compliant',
-        data: {
-          'Source URL': 'https://example.com/product/67890',
-          'Issue': 'MRP missing on label'
-        }
-      }
-    ]);
-  }
-}
-
-// Parse CSV function
-function parseCSV(csvText) {
-  const lines = csvText.split('\n');
-  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
-  const data = [];
-  
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim()) {
-      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
-      const row = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-      data.push(row);
-    }
-  }
-  return data;
-}
-
-// Generate sample results from CSV data
-function generateSampleResults(mobileData, laptopData, proteinData) {
-  const results = [];
-  
-  // Sample compliant result from mobile data
-  if (mobileData.length > 0) {
-    const mobile = mobileData[0];
-    results.push({
-      status: 'compliant',
-      title: 'Compliance Status: ✅ Compliant',
-      data: {
-        'Product Name': mobile.name ? mobile.name.substring(0, 50) + '...' : 'Sample Mobile Product',
-        'Source URL': mobile.product_link || 'https://example.com/mobile/12345',
-        'Price': mobile.price || '₹12,999',
-        'Details': mobile.details ? mobile.details.substring(0, 100) + '...' : 'Mobile phone specifications',
-        'Manufacturer': 'Samsung',
-        'Country of Origin': 'India',
-        'Consumer Care': '1800-123-456'
-      }
-    });
-  }
-  
-  // Sample non-compliant result from protein data
-  if (proteinData.length > 0) {
-    const protein = proteinData[0];
-    results.push({
-      status: 'non-compliant',
-      title: 'Compliance Status: ❌ Non-Compliant',
-      data: {
-        'Product Name': protein['Product Name'] ? protein['Product Name'].substring(0, 50) + '...' : 'Sample Protein Product',
-        'Source URL': protein['Product Link'] || 'https://example.com/protein/67890',
-        'Price': protein.Price || '₹509',
-        'Issue': 'Missing mandatory product information',
-        'Details': 'Product lacks required compliance declarations'
-      }
-    });
-  }
-  
-  return results;
-}
-
-// Populate sample results
-function populateSampleResults(results) {
-  const container = document.getElementById('sampleResults');
-  container.innerHTML = '';
-  
-  results.forEach(result => {
-    const resultCard = document.createElement('div');
-    resultCard.className = 'result-card';
-    
-    const statusClass = result.status === 'compliant' ? 'compliant' : 'non-compliant';
-    let html = `<h3>${result.title}</h3>`;
-    
-    Object.entries(result.data).forEach(([key, value]) => {
-      html += `<p><strong>${key}:</strong> ${value}</p>`;
-    });
-    
-    resultCard.innerHTML = html;
-    container.appendChild(resultCard);
-  });
-}
-
-// Load sample results when page loads
-loadSampleResults();
 </script>
 
 </body>
