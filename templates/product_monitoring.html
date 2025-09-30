@@ -321,38 +321,36 @@
       </form>
     </div>
 
-    <!-- Card 3: Upload Photo -->
+    <!-- Card 3: Upload Photo (Device) -->
     <div class="card">
       <h2>Upload Product Photo</h2>
       <form id="photoForm" action="/check_product" method="POST" enctype="multipart/form-data">
-        <label for="sourceSelect">Image Source:</label>
-        <select id="sourceSelect" name="source">
-          <option value="device" selected>Choose from device</option>
-          <option value="camera">Capture from camera</option>
-        </select>
-
-        <div id="devicePicker">
-          <label for="image">Select Image:</label>
-          <input type="file" id="image" name="image" accept="image/*">
-        </div>
-
-        <div id="cameraSection" style="display:none;">
-          <label>Camera:</label>
-          <video id="cameraStream" autoplay playsinline style="width:100%; border-radius:8px; background:#000;"></video>
-          <div style="display:flex; gap:10px; margin-top:10px;">
-            <button type="button" id="startCameraBtn">Start Camera</button>
-            <button type="button" id="captureBtn" disabled>Capture</button>
-            <button type="button" id="recaptureBtn" style="display:none;">Re-capture</button>
-          </div>
-        </div>
-
-        <div id="previewSection" style="display:none; margin-top:10px;">
-          <label>Preview:</label>
-          <img id="previewImg" alt="Preview" style="width:100%; max-height:260px; object-fit:contain; border:1px solid #eee; border-radius:8px;" />
-        </div>
-
+        <label for="image">Select Image:</label>
+        <input type="file" id="image" name="image" accept="image/*">
         <button id="checkBtn" type="submit">Check Compliance</button>
       </form>
+    </div>
+
+    <!-- Card 4: ESP32-CAM -->
+    <div class="card">
+      <h2>ESP32-CAM</h2>
+      {% if esp32_stream_url %}
+        <div style="margin-bottom:10px;">
+          <img src="{{ esp32_stream_url }}" alt="ESP32 Live Stream" style="width:100%; max-height:220px; object-fit:cover; border-radius:8px; background:#000;" onerror="this.style.display='none'">
+        </div>
+      {% endif %}
+      <div style="display:flex; gap:10px;">
+        <a href="/capture_and_check" style="flex:1; text-align:center;" class="report-button">Capture from ESP32</a>
+        {% if esp32_snapshot_url %}
+          <a href="{{ esp32_snapshot_url }}" target="_blank" style="flex:1; text-align:center;" class="report-button">Open Snapshot URL</a>
+        {% endif %}
+      </div>
+      {% if last_snapshot_url %}
+        <div style="margin-top:12px;">
+          <label>Last Snapshot:</label>
+          <img data-preview src="{{ last_snapshot_url }}" alt="Last Snapshot" style="width:100%; max-height:220px; object-fit:contain; border:1px solid #eee; border-radius:8px;" />
+        </div>
+      {% endif %}
     </div>
 
   </div>
@@ -372,13 +370,15 @@
     <div class="result-card">
       <h3>Processing Result</h3>
       {% if results.data %}
-        {% for k,v in results.data.items() %}
-          <p><strong>{{ k }}:</strong> {{ v }}</p>
-        {% endfor %}
-      {% endif %}
-      {% if results.raw_text %}
-        <h4 style="margin-top:12px;">Extracted OCR Text</h4>
-        <pre style="white-space:pre-wrap; background:#f8f9fa; padding:12px; border-radius:8px;">{{ results.raw_text }}</pre>
+        <p><strong>product:</strong> {{ results.data.product or 'Uploaded Product' }}</p>
+        <p><strong>mrp:</strong> {{ results.data.mrp or 'Not Found' }}</p>
+        <p><strong>net_quantity:</strong> {{ results.data.net_quantity or 'Not Found' }}</p>
+        <p><strong>manufacturer:</strong> {{ results.data.manufacturer or 'Not Found' }}</p>
+        <p><strong>country:</strong> {{ results.data.country or 'Not Found' }}</p>
+        <p><strong>care:</strong> {{ results.data.care or 'Not Found' }}</p>
+        {% if results.data.issue %}
+          <p><strong>issue:</strong> {{ results.data.issue }}</p>
+        {% endif %}
       {% endif %}
       {% if results.compare %}
         <h4 style="margin-top:12px;">CSV Matches (≥ {{ results.compare.threshold }}%)</h4>
@@ -585,139 +585,27 @@ function populateSampleResults(_) {}
 
 // Removed demo sample results to avoid showing placeholder compliance cards
 
-// -----------------------------
-// Upload Photo: Device/Camera handling
-// -----------------------------
+// Upload-only: show preview when choosing a file
 (function(){
-  const sourceSelect = document.getElementById('sourceSelect');
-  const devicePicker = document.getElementById('devicePicker');
   const fileInput = document.getElementById('image');
-  const cameraSection = document.getElementById('cameraSection');
-  const videoEl = document.getElementById('cameraStream');
-  const startBtn = document.getElementById('startCameraBtn');
-  const captureBtn = document.getElementById('captureBtn');
-  const recaptureBtn = document.getElementById('recaptureBtn');
-  const previewSection = document.getElementById('previewSection');
-  const previewImg = document.getElementById('previewImg');
-  const form = document.getElementById('photoForm');
-
-  let mediaStream = null;
-  let capturedBlob = null;
-
-  function stopCamera(){
-    if(mediaStream){
-      mediaStream.getTracks().forEach(t => t.stop());
-      mediaStream = null;
-    }
-    if(videoEl){
-      videoEl.srcObject = null;
-    }
-    captureBtn.disabled = true;
-  }
-
-  function showPreviewFromFile(file){
-    if(!file) return;
+  if(!fileInput) return;
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files && fileInput.files[0];
+    if(!f) return;
     const reader = new FileReader();
     reader.onload = e => {
-      previewImg.src = e.target.result;
-      previewSection.style.display = 'block';
-    };
-    reader.readAsDataURL(file);
-  }
-
-  async function startCamera(){
-    try{
-      stopCamera();
-      mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-      videoEl.srcObject = mediaStream;
-      captureBtn.disabled = false;
-      recaptureBtn.style.display = 'none';
-      previewSection.style.display = 'none';
-      capturedBlob = null;
-    }catch(err){
-      alert('Unable to access camera. Please allow permissions or use device upload.');
-      console.error(err);
-    }
-  }
-
-  function dataURLToFile(dataUrl, filename){
-    const arr = dataUrl.split(',');
-    const mime = arr[0].match(/:(.*?);/)[1];
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while(n--){ u8arr[n] = bstr.charCodeAt(n); }
-    return new File([u8arr], filename, { type: mime });
-  }
-
-  function assignFileToInput(file){
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    fileInput.files = dt.files;
-  }
-
-  async function capturePhoto(){
-    const video = videoEl;
-    const canvas = document.createElement('canvas');
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, w, h);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    previewImg.src = dataUrl;
-    previewSection.style.display = 'block';
-    // Create a File and set into the file input so form submit works normally
-    const file = dataURLToFile(dataUrl, 'capture.jpg');
-    assignFileToInput(file);
-    capturedBlob = file;
-    recaptureBtn.style.display = 'inline-block';
-    // Optional: stop camera after capture
-    stopCamera();
-  }
-
-  function recapture(){
-    capturedBlob = null;
-    previewSection.style.display = 'none';
-    startCamera();
-  }
-
-  function onSourceChange(){
-    const src = sourceSelect.value;
-    if(src === 'device'){
-      cameraSection.style.display = 'none';
-      stopCamera();
-      devicePicker.style.display = 'block';
-      recaptureBtn.style.display = 'none';
-    } else {
-      devicePicker.style.display = 'none';
-      cameraSection.style.display = 'block';
-    }
-  }
-
-  // Event bindings
-  if(sourceSelect){ sourceSelect.addEventListener('change', onSourceChange); }
-  if(startBtn){ startBtn.addEventListener('click', startCamera); }
-  if(captureBtn){ captureBtn.addEventListener('click', capturePhoto); }
-  if(recaptureBtn){ recaptureBtn.addEventListener('click', recapture); }
-  if(fileInput){ fileInput.addEventListener('change', () => {
-    const f = fileInput.files && fileInput.files[0];
-    showPreviewFromFile(f);
-  }); }
-
-  if(form){
-    form.addEventListener('submit', function(e){
-      // If camera selected but nothing captured yet, block submit
-      if(sourceSelect && sourceSelect.value === 'camera' && !fileInput.files.length){
-        e.preventDefault();
-        alert('Please capture a photo first.');
-        return false;
+      const previewHolderId = 'previewHolder';
+      let holder = document.getElementById(previewHolderId);
+      if(!holder){
+        holder = document.createElement('div');
+        holder.id = previewHolderId;
+        holder.style.marginTop = '10px';
+        fileInput.parentElement.appendChild(holder);
       }
-    });
-  }
-
-  // Initialize UI state
-  onSourceChange();
+      holder.innerHTML = '<label>Preview:</label><img style="width:100%; max-height:260px; object-fit:contain; border:1px solid #eee; border-radius:8px;" src="'+e.target.result+'"/>';
+    };
+    reader.readAsDataURL(f);
+  });
 })();
 
 // -----------------------------

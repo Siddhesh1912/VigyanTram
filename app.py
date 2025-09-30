@@ -32,14 +32,23 @@ app.secret_key = "your_secret_key"   # Required for sessions
 
 UPLOAD_FOLDER = "static/uploads"
 PROCESSED_FOLDER = "static/processed"
+CAPTURE_FOLDER = "static/captures"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
+os.makedirs(CAPTURE_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 DB_PATH = "compliance.db"
 
 # Allow loading of truncated images to avoid hard failures on partial uploads
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+# -----------------------------
+# ESP32-CAM Configuration (defaults)
+# -----------------------------
+ESP32_STREAM_URL = "http://192.168.0.123:81/stream"
+ESP32_SNAPSHOT_URL = "http://10.219.158.90/capture"
+CSV_LOG_PATH = "img.csv"
 
 # -----------------------------
 # DB Helper
@@ -157,6 +166,62 @@ def find_top_csv_matches(ocr_text, products, min_ratio=0.5, limit=5):
     return scored[:limit]
 
 # -----------------------------
+# Legal Metrology Rule Engine (simple, extensible)
+# -----------------------------
+def evaluate_legal_metrology_rules(extracted):
+    """Evaluate basic Legal Metrology-like rules on extracted data.
+    Returns (is_compliant: bool, issues: list[str])
+    """
+    issues = []
+    # Required fields
+    if not extracted.get("mrp") or extracted.get("mrp") == "Not Found":
+        issues.append("Missing MRP")
+    if not extracted.get("country") or extracted.get("country") == "Not Found":
+        issues.append("Missing country of origin")
+    if not extracted.get("net_quantity") or extracted.get("net_quantity") == "Not Found":
+        issues.append("Missing net quantity")
+    # Basic unit sanity for net quantity when present
+    nq = (extracted.get("net_quantity") or "").lower()
+    if nq and nq != "not found":
+        if not re.search(r"\b(ml|l|g|kg|pcs|piece|tablet|capsule|pack)\b", nq):
+            issues.append("Net quantity unit may be missing or invalid")
+    # Basic MRP format sanity
+    mrp = extracted.get("mrp") or ""
+    if mrp and mrp != "Not Found":
+        if not re.search(r"(₹|rs\.?\s?)\s?\d", mrp.lower()):
+            issues.append("MRP format invalid")
+    is_compliant = len(issues) == 0
+    return is_compliant, issues
+
+# -----------------------------
+# Category guessing from OCR text
+# -----------------------------
+def guess_category_from_text(text):
+    """Return one of 'mobile', 'laptop', 'protein', or None based on simple keyword heuristics."""
+    if not text:
+        return None
+    t = text.lower()
+    mobile_kw = ["iphone", "samsung", "galaxy", "pixel", "oneplus", "realme", "redmi", "mi", "oppo", "vivo", "motorola", "5g", "android"]
+    laptop_kw = ["laptop", "notebook", "macbook", "thinkpad", "ideapad", "pavilion", "inspiron", "ryzen", "intel", "i5", "i7", "ssd", "ram", "graphics"]
+    protein_kw = ["protein", "whey", "isolate", "casein", "supplement", "gainer", "scoop", "bcaa", "serving"]
+    if any(k in t for k in mobile_kw):
+        return "mobile"
+    if any(k in t for k in laptop_kw):
+        return "laptop"
+    if any(k in t for k in protein_kw):
+        return "protein"
+    return None
+
+def get_products_by_category(category):
+    if category == "mobile":
+        return mobile_products
+    if category == "laptop":
+        return laptop_products
+    if category == "protein":
+        return protein_products
+    return all_products
+
+# -----------------------------
 # Path normalization for URLs
 # -----------------------------
 def to_url_path(p):
@@ -265,17 +330,35 @@ def serve_csv(filename):
 @login_required
 def product_monitoring():
     # Pass CSV data to template for display
+    last_snapshot_rel = session.get("last_snapshot_rel")
+    last_snapshot_url = None
+    if last_snapshot_rel:
+        # Build a static URL for the last snapshot
+        try:
+            # Expecting something like uploads/filename.jpg
+            if last_snapshot_rel.startswith("uploads/"):
+                last_snapshot_url = url_for('static', filename=last_snapshot_rel)
+            elif last_snapshot_rel.startswith("static/"):
+                # Backward compatibility
+                last_snapshot_url = "/" + last_snapshot_rel
+        except Exception:
+            last_snapshot_url = None
+
     return render_template("product_monitoring.html", 
                          results=None, 
                          laptop_products=laptop_products[:10],  # Show first 10 for demo
                          mobile_products=mobile_products[:10],
-                         protein_products=protein_products[:10])
+                         protein_products=protein_products[:10],
+                         esp32_stream_url=ESP32_STREAM_URL,
+                         esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                         last_snapshot_url=last_snapshot_url)
 
 @app.route("/check_product", methods=["POST"])
 @login_required
 def check_product():
     url = request.form.get("url")
     image = request.files.get("image")
+    snapshot_url = request.form.get("snapshot_url")
 
     results = {"url": url, "filename": None, "processed_file": None, "data": {}, "compliant": True}
 
@@ -301,14 +384,12 @@ def check_product():
         if img and img.get("src"):
             results["filename"] = img["src"]
 
-        # Compliance decision: if matched with high confidence, mark compliant; otherwise use missing fields
-        if extracted_data.get("matched_from_csv") and extracted_data.get("match_score", 0) >= 90:
-            results["compliant"] = True
-            results["data"]["compliance_note"] = "Matched product in catalog with high confidence (>=90%)."
-        else:
-            if results["data"]["mrp"] == "Not Found" or results["data"]["country"] == "Not Found":
-                results["compliant"] = False
-                results["data"]["issue"] = "Missing mandatory fields"
+        # Compliance decision based on presence of mandatory fields
+        # Evaluate rule engine
+        compliant, issues = evaluate_legal_metrology_rules(results["data"])
+        results["compliant"] = compliant
+        if not compliant:
+            results["data"]["issue"] = "; ".join(issues)
 
         run_query('''INSERT INTO products
             (title, brand, seller, category, scanned_at, source_url,
@@ -371,17 +452,28 @@ def check_product():
                 return render_template("product_monitoring.html", results=results)
 
         # Extract data from OCR text and validate against CSV data
+        # Extract email if present
+        try:
+            email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", text)
+            care_email = email_match.group(0) if email_match else None
+        except Exception:
+            care_email = None
+
         extracted_data = {
             "product": "Uploaded Product",
             "mrp": "₹" + text.split("MRP")[-1].split("\n")[0].strip() if "MRP" in text else "Not Found",
             "net_quantity": "500g" if "500g" in text else "Not Found",
             "manufacturer": "ABC Foods" if "ABC" in text else "Not Found",
             "country": "India" if "India" in text else "Not Found",
-            "care": "care@abc.com" if "@" in text else "Not Found"
+            "care": care_email or ("care@abc.com" if "@" in text else "Not Found")
         }
         
-        # Try to match with existing products in CSV data (fuzzy >= 0.9)
-        matched_product, match_score = find_best_csv_match(text, all_products)
+        # Prefer category-based matching first
+        guessed_cat = guess_category_from_text(text)
+        cat_products = get_products_by_category(guessed_cat)
+        matched_product, match_score = find_best_csv_match(text, cat_products)
+        if (not matched_product) or match_score < 0.90:
+            matched_product, match_score = find_best_csv_match(text, all_products)
         if matched_product and match_score >= 0.90:
             # Merge best-known fields from CSV
             extracted_data.update({
@@ -406,9 +498,11 @@ def check_product():
         results["processed_file"] = to_url_path(processed_path)
         results["raw_text"] = text
 
-        # Compute 50%+ similarity matches across all CSVs
+        # Compute 50%+ similarity matches, prioritize guessed category
         try:
-            top_matches = find_top_csv_matches(text, all_products, min_ratio=0.50, limit=5)
+            top_matches = find_top_csv_matches(text, cat_products, min_ratio=0.50, limit=5)
+            if not top_matches:
+                top_matches = find_top_csv_matches(text, all_products, min_ratio=0.50, limit=5)
         except Exception as _me:
             print('Match computation error:', _me)
             top_matches = []
@@ -497,7 +591,289 @@ def check_product():
         except Exception as e:
             print("Extracted text CSV write error:", e)
 
+    # --- CASE 3: ESP32 snapshot URL provided ---
+    elif snapshot_url:
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = requests.get(snapshot_url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            # Determine extension from content-type if possible
+            ext = ".jpg"
+            ctype = resp.headers.get("Content-Type", "")
+            if "png" in ctype:
+                ext = ".png"
+            elif "jpeg" in ctype or "jpg" in ctype:
+                ext = ".jpg"
+            filename = secure_filename(f"esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+            filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            with open(filepath, "wb") as f:
+                f.write(resp.content)
+            results["filename"] = filepath
+
+            # OCR
+            text = pytesseract.image_to_string(Image.open(filepath))
+
+            extracted_data = {
+                "product": "ESP32 Snapshot",
+                "mrp": "₹" + text.split("MRP")[-1].split("\n")[0].strip() if "MRP" in text else "Not Found",
+                "net_quantity": "500g" if "500g" in text else "Not Found",
+                "manufacturer": "ABC Foods" if "ABC" in text else "Not Found",
+                "country": "India" if "India" in text else "Not Found",
+                "care": "care@abc.com" if "@" in text else "Not Found"
+            }
+
+            # Lightweight name keyword match
+            matched_product = None
+            for product in all_products:
+                if any(keyword in text.lower() for keyword in (product.get('name', '') or '').lower().split()[:3]):
+                    matched_product = product
+                    break
+            if matched_product:
+                extracted_data.update({
+                    "product": matched_product.get('name', 'ESP32 Snapshot'),
+                    "mrp": matched_product.get('price', 'Not Found'),
+                    "matched_from_csv": True
+                })
+
+            results["data"] = extracted_data
+            # Evaluate rule engine for ESP32 URL flow
+            compliant, issues = evaluate_legal_metrology_rules(results["data"])
+            results["compliant"] = compliant
+            if not compliant:
+                results["data"]["issue"] = "; ".join(issues)
+
+            processed_path = os.path.join(PROCESSED_FOLDER, "processed_" + filename)
+            Image.open(filepath).save(processed_path)
+            results["processed_file"] = processed_path
+
+            run_query('''INSERT INTO products
+                (title, brand, seller, category, scanned_at, source_url,
+                 mrp, net_qty, manufacturer, country_of_origin, consumer_care, raw_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (results["data"]["product"], None, None, None, datetime.now().isoformat(),
+                 snapshot_url, results["data"]["mrp"], results["data"]["net_quantity"],
+                 results["data"]["manufacturer"], results["data"]["country"],
+                 results["data"]["care"], text))
+
+            product_id = run_query("SELECT last_insert_rowid()", fetch=True)[0][0]
+            results["product_id"] = product_id
+
+            if not results["compliant"]:
+                run_query('''INSERT INTO violations (product_id, issue, severity, detected_at)
+                             VALUES (?, ?, ?, ?)''',
+                          (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
+        except Exception as e:
+            results["data"] = {"error": f"Failed to fetch from ESP32: {e}"}
+            results["compliant"] = False
+
     return render_template("product_monitoring.html", results=results)
+
+# -----------------------------
+# Minimal snapshot capture + CSV log API
+# -----------------------------
+@app.get("/check_compliance")
+@login_required
+def check_compliance():
+    """Fetch snapshot from ESP32, save to static/captures, and log to img.csv."""
+    # Fetch snapshot
+    try:
+        resp = requests.get(ESP32_SNAPSHOT_URL, timeout=8)
+        if resp.status_code != 200:
+            return jsonify({
+                "status": "error",
+                "message": f"ESP32 returned status {resp.status_code}"
+            }), 502
+        content = resp.content
+        if not content:
+            return jsonify({
+                "status": "error",
+                "message": "Empty response from ESP32"
+            }), 502
+    except requests.exceptions.RequestException as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 504
+
+    # Timestamps and filenames
+    now = datetime.now()
+    timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    filename = now.strftime("%Y%m%d_%H%M%S") + ".jpg"
+    file_path = os.path.join(CAPTURE_FOLDER, filename)
+
+    # Save file
+    try:
+        with open(file_path, "wb") as f:
+            f.write(content)
+    except OSError as exc:
+        return jsonify({"status": "error", "message": f"Failed to save image: {exc}"}), 500
+
+    # Ensure CSV exists, write header if missing
+    try:
+        new_file = not os.path.exists(CSV_LOG_PATH)
+        with open(CSV_LOG_PATH, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            if new_file:
+                writer.writerow(["timestamp", "filename"])
+            writer.writerow([timestamp_str, filename])
+    except OSError as exc:
+        return jsonify({"status": "error", "message": f"Failed to write to img.csv: {exc}"}), 500
+
+    return jsonify({
+        "status": "success",
+        "timestamp": timestamp_str,
+        "filename": filename
+    })
+
+# -----------------------------
+# Capture ESP32 Snapshot
+# -----------------------------
+@app.route("/capture_snapshot", methods=["GET"])
+@login_required
+def capture_snapshot():
+    """Fetch snapshot from ESP32-CAM and save into static/uploads with timestamp."""
+    snapshot_url = request.args.get("url") or ESP32_SNAPSHOT_URL
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(snapshot_url, headers=headers, timeout=10)
+        resp.raise_for_status()
+
+        # Determine file extension from content-type
+        ext = ".jpg"
+        ctype = resp.headers.get("Content-Type", "")
+        if "png" in ctype:
+            ext = ".png"
+        elif "jpeg" in ctype or "jpg" in ctype:
+            ext = ".jpg"
+
+        filename = secure_filename(f"esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+        # Save as static/uploads/<filename>
+        save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        with open(save_path, "wb") as f:
+            f.write(resp.content)
+
+        # Store relative path for building URL later
+        # We prefer 'uploads/<filename>' for url_for('static', ...)
+        session["last_snapshot_rel"] = f"uploads/{filename}"
+
+    except Exception as e:
+        # Optionally store error info
+        session["last_snapshot_error"] = str(e)
+
+    # Redirect back to product monitoring to show last captured
+    return redirect(url_for("product_monitoring"))
+
+# -----------------------------
+# Capture from ESP32 and process immediately
+# -----------------------------
+@app.route("/capture_and_check", methods=["GET"])
+@login_required
+def capture_and_check():
+    """Capture a snapshot from ESP32, run OCR + CSV match, and render results."""
+    snapshot_url = request.args.get("url") or ESP32_SNAPSHOT_URL
+    results = {"url": None, "filename": None, "processed_file": None, "data": {}, "compliant": True}
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(snapshot_url, headers=headers, timeout=10)
+        resp.raise_for_status()
+
+        # Determine file extension from content-type
+        ext = ".jpg"
+        ctype = resp.headers.get("Content-Type", "")
+        if "png" in ctype:
+            ext = ".png"
+        elif "jpeg" in ctype or "jpg" in ctype:
+            ext = ".jpg"
+
+        filename = secure_filename(f"esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}")
+        save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        with open(save_path, "wb") as f:
+            f.write(resp.content)
+        results["filename"] = to_url_path(save_path)
+        session["last_snapshot_rel"] = f"uploads/{filename}"
+
+        # OCR preprocessing and extraction (reuse logic similar to upload branch)
+        pil_img = Image.open(save_path)
+        try:
+            pil_gray = pil_img.convert('L')
+            w, h = pil_gray.size
+            pil_gray = pil_gray.resize((w*2, h*2))
+            pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
+            pil_autocontrast = ImageOps.autocontrast(pil_blur)
+            pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
+            text = pytesseract.image_to_string(pil_thresh, config='--oem 3 --psm 6')
+            processed_image_for_save = pil_thresh
+        except Exception:
+            text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
+            processed_image_for_save = pil_img
+
+        # Extract email if present
+        try:
+            email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", text)
+            care_email = email_match.group(0) if email_match else None
+        except Exception:
+            care_email = None
+
+        extracted_data = {
+            "product": "ESP32 Snapshot",
+            "mrp": "₹" + text.split("MRP")[-1].split("\n")[0].strip() if "MRP" in text else "Not Found",
+            "net_quantity": "500g" if "500g" in text else "Not Found",
+            "manufacturer": "ABC Foods" if "ABC" in text else "Not Found",
+            "country": "India" if "India" in text else "Not Found",
+            "care": care_email or ("care@abc.com" if "@" in text else "Not Found")
+        }
+
+        # Prefer category-based matching first
+        guessed_cat = guess_category_from_text(text)
+        cat_products = get_products_by_category(guessed_cat)
+        matched_product, match_score = find_best_csv_match(text, cat_products)
+        if (not matched_product) or match_score < 0.90:
+            matched_product, match_score = find_best_csv_match(text, all_products)
+        if matched_product and match_score >= 0.90:
+            extracted_data.update({
+                "product": matched_product.get('name') or matched_product.get('Product Name') or extracted_data.get('product'),
+                "mrp": matched_product.get('price') or matched_product.get('Price') or extracted_data.get('mrp'),
+                "matched_from_csv": True,
+                "match_score": round(match_score * 100, 2)
+            })
+
+        results["data"] = extracted_data
+        # Evaluate rule engine for ESP32 capture-and-check
+        compliant, issues = evaluate_legal_metrology_rules(results["data"])
+        results["compliant"] = compliant
+        if not compliant:
+            results["data"]["issue"] = "; ".join(issues)
+
+        processed_path = os.path.join(PROCESSED_FOLDER, "processed_" + filename)
+        try:
+            processed_image_for_save.save(processed_path)
+        except Exception:
+            Image.open(save_path).save(processed_path)
+        results["processed_file"] = to_url_path(processed_path)
+        results["raw_text"] = text
+
+        # Save DB records
+        run_query('''INSERT INTO products
+            (title, brand, seller, category, scanned_at, source_url,
+             mrp, net_qty, manufacturer, country_of_origin, consumer_care, raw_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (results["data"]["product"], None, None, None, datetime.now().isoformat(),
+             snapshot_url, results["data"]["mrp"], results["data"]["net_quantity"],
+             results["data"]["manufacturer"], results["data"]["country"],
+             results["data"]["care"], text))
+
+        product_id = run_query("SELECT last_insert_rowid()", fetch=True)[0][0]
+        results["product_id"] = product_id
+        if not results["compliant"]:
+            run_query('''INSERT INTO violations (product_id, issue, severity, detected_at)
+                         VALUES (?, ?, ?, ?)''',
+                      (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
+
+    except Exception as e:
+        results["data"] = {"error": f"Failed to capture/process from ESP32: {e}"}
+        results["compliant"] = False
+
+    return render_template("product_monitoring.html", results=results,
+                           esp32_stream_url=ESP32_STREAM_URL,
+                           esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                           last_snapshot_url=url_for('static', filename=session.get("last_snapshot_rel")) if session.get("last_snapshot_rel") else None)
 
 @app.route("/search_products", methods=["GET", "POST"])
 @login_required
