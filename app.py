@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, send_file, session
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, jsonify
 import requests, os, sqlite3
 from bs4 import BeautifulSoup
 from werkzeug.utils import secure_filename
@@ -408,7 +408,7 @@ def check_product():
                       (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
 
     # --- CASE 2: Image uploaded ---
-    elif image:
+    elif image and getattr(image, 'filename', ''):
         filename = secure_filename(image.filename)
         filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         image.save(filepath)
@@ -422,12 +422,22 @@ def check_product():
             # Gracefully report invalid image and return page
             results["compliant"] = False
             results["data"] = {"issue": "Invalid or corrupted image. Please recapture or upload a valid image."}
-            return render_template("product_monitoring.html", results=results)
+            last_snapshot_rel = session.get("last_snapshot_rel")
+            last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+            return render_template("product_monitoring.html", results=results,
+                                   esp32_stream_url=ESP32_STREAM_URL,
+                                   esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                                   last_snapshot_url=last_snapshot_url)
         except Exception as _open_e:
             print('Image open error:', _open_e)
             results["compliant"] = False
             results["data"] = {"issue": "Unable to read the uploaded image."}
-            return render_template("product_monitoring.html", results=results)
+            last_snapshot_rel = session.get("last_snapshot_rel")
+            last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+            return render_template("product_monitoring.html", results=results,
+                                   esp32_stream_url=ESP32_STREAM_URL,
+                                   esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                                   last_snapshot_url=last_snapshot_url)
 
         # OCR with Pillow-only preprocessing (no OpenCV dependency)
         try:
@@ -449,7 +459,12 @@ def check_product():
                 print('OCR fallback error:', _pe2)
                 results["compliant"] = False
                 results["data"] = {"issue": "OCR failed on the uploaded image."}
-                return render_template("product_monitoring.html", results=results)
+                last_snapshot_rel = session.get("last_snapshot_rel")
+                last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+                return render_template("product_monitoring.html", results=results,
+                                       esp32_stream_url=ESP32_STREAM_URL,
+                                       esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                                       last_snapshot_url=last_snapshot_url)
 
         # Extract data from OCR text and validate against CSV data
         # Extract email if present
@@ -608,10 +623,23 @@ def check_product():
             filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             with open(filepath, "wb") as f:
                 f.write(resp.content)
-            results["filename"] = filepath
+            results["filename"] = to_url_path(filepath)
 
-            # OCR
-            text = pytesseract.image_to_string(Image.open(filepath))
+            # OCR with fast preprocessing (align with upload flow)
+            try:
+                pil_img = Image.open(filepath)
+                pil_img.load()
+                pil_gray = pil_img.convert('L')
+                w, h = pil_gray.size
+                pil_gray = pil_gray.resize((max(1, w*2), max(1, h*2)))
+                pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
+                pil_autocontrast = ImageOps.autocontrast(pil_blur)
+                pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
+                text = pytesseract.image_to_string(pil_thresh, config='--oem 3 --psm 6')
+                processed_image_for_save = pil_thresh
+            except Exception:
+                text = pytesseract.image_to_string(Image.open(filepath), config='--oem 3 --psm 6')
+                processed_image_for_save = Image.open(filepath)
 
             extracted_data = {
                 "product": "ESP32 Snapshot",
@@ -643,8 +671,11 @@ def check_product():
                 results["data"]["issue"] = "; ".join(issues)
 
             processed_path = os.path.join(PROCESSED_FOLDER, "processed_" + filename)
-            Image.open(filepath).save(processed_path)
-            results["processed_file"] = processed_path
+            try:
+                processed_image_for_save.save(processed_path)
+            except Exception:
+                Image.open(filepath).save(processed_path)
+            results["processed_file"] = to_url_path(processed_path)
 
             run_query('''INSERT INTO products
                 (title, brand, seller, category, scanned_at, source_url,
@@ -666,7 +697,12 @@ def check_product():
             results["data"] = {"error": f"Failed to fetch from ESP32: {e}"}
             results["compliant"] = False
 
-    return render_template("product_monitoring.html", results=results)
+    last_snapshot_rel = session.get("last_snapshot_rel")
+    last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+    return render_template("product_monitoring.html", results=results,
+                           esp32_stream_url=ESP32_STREAM_URL,
+                           esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                           last_snapshot_url=last_snapshot_url)
 
 # -----------------------------
 # Minimal snapshot capture + CSV log API
@@ -677,7 +713,7 @@ def check_compliance():
     """Fetch snapshot from ESP32, save to static/captures, and log to img.csv."""
     # Fetch snapshot
     try:
-        resp = requests.get(ESP32_SNAPSHOT_URL, timeout=8)
+        resp = requests.get(ESP32_SNAPSHOT_URL, timeout=5)
         if resp.status_code != 200:
             return jsonify({
                 "status": "error",
@@ -732,7 +768,7 @@ def capture_snapshot():
     snapshot_url = request.args.get("url") or ESP32_SNAPSHOT_URL
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(snapshot_url, headers=headers, timeout=10)
+        resp = requests.get(snapshot_url, headers=headers, timeout=5)
         resp.raise_for_status()
 
         # Determine file extension from content-type
@@ -771,7 +807,7 @@ def capture_and_check():
     results = {"url": None, "filename": None, "processed_file": None, "data": {}, "compliant": True}
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(snapshot_url, headers=headers, timeout=10)
+        resp = requests.get(snapshot_url, headers=headers, timeout=5)
         resp.raise_for_status()
 
         # Determine file extension from content-type
@@ -998,6 +1034,8 @@ Image URL: {sample_product.get('image_url', 'No image')}"""
         ('ALIGN',(0,0),(-1,-1),'LEFT'),
         ('GRID', (0,0), (-1,-1), 1, colors.black),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')
+
+        
     ]))
     table.wrapOn(c, width, height)
     table.drawOn(c, 40, y_text-160)

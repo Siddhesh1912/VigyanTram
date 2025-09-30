@@ -232,6 +232,17 @@
     transform: translateY(-2px);
   }
 
+  /* Loading overlay */
+  #loadingOverlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: none; align-items: center; justify-content: center; z-index: 3000;
+  }
+  .spinner {
+    width: 56px; height: 56px; border: 6px solid #fff; border-top-color: #DB5A5A; border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   /* Footer */
   footer { text-align:center; padding:15px; background:#2F3C7E; color:white; margin-top:20px; }
 </style>
@@ -321,37 +332,29 @@
       </form>
     </div>
 
-    <!-- Card 3: Upload Photo (Device) -->
+    <!-- Card 3: Upload Photo (Device or ESP32) -->
     <div class="card">
       <h2>Upload Product Photo</h2>
       <form id="photoForm" action="/check_product" method="POST" enctype="multipart/form-data">
-        <label for="image">Select Image:</label>
-        <input type="file" id="image" name="image" accept="image/*">
-        <button id="checkBtn" type="submit">Check Compliance</button>
+        <label for="sourceSelect">Image Source:</label>
+        <select id="sourceSelect" name="source">
+          <option value="esp32" selected>Capture from ESP32-CAM</option>
+          <option value="device">Select from device</option>
+        </select>
+
+        <div id="devicePicker" style="margin-top:8px;">
+          <label for="image">Select Image:</label>
+          <input type="file" id="image" name="image" accept="image/*">
+        </div>
+
+        <input type="hidden" id="snapshot_url" name="snapshot_url" value="{{ esp32_snapshot_url }}">
+    
+        <button id="checkBtn" type="submit" style="margin-top:12px;">Check Compliance</button>
       </form>
     </div>
+    
 
-    <!-- Card 4: ESP32-CAM -->
-    <div class="card">
-      <h2>ESP32-CAM</h2>
-      {% if esp32_stream_url %}
-        <div style="margin-bottom:10px;">
-          <img src="{{ esp32_stream_url }}" alt="ESP32 Live Stream" style="width:100%; max-height:220px; object-fit:cover; border-radius:8px; background:#000;" onerror="this.style.display='none'">
-        </div>
-      {% endif %}
-      <div style="display:flex; gap:10px;">
-        <a href="/capture_and_check" style="flex:1; text-align:center;" class="report-button">Capture from ESP32</a>
-        {% if esp32_snapshot_url %}
-          <a href="{{ esp32_snapshot_url }}" target="_blank" style="flex:1; text-align:center;" class="report-button">Open Snapshot URL</a>
-        {% endif %}
-      </div>
-      {% if last_snapshot_url %}
-        <div style="margin-top:12px;">
-          <label>Last Snapshot:</label>
-          <img data-preview src="{{ last_snapshot_url }}" alt="Last Snapshot" style="width:100%; max-height:220px; object-fit:contain; border:1px solid #eee; border-radius:8px;" />
-        </div>
-      {% endif %}
-    </div>
+    
 
   </div>
 
@@ -378,7 +381,7 @@
         <p><strong>care:</strong> {{ results.data.care or 'Not Found' }}</p>
         {% if results.data.issue %}
           <p><strong>issue:</strong> {{ results.data.issue }}</p>
-        {% endif %}
+      {% endif %}
       {% endif %}
       {% if results.compare %}
         <h4 style="margin-top:12px;">CSV Matches (≥ {{ results.compare.threshold }}%)</h4>
@@ -426,10 +429,18 @@
           {% endif %}
         </div>
       {% endif %}
+      {% if results.data and results.data.error %}
+        <div class="violation-item" style="margin-top:12px; background:#f8d7da; border-color:#f5c6cb;">
+          <strong>Capture Error:</strong> {{ results.data.error }}
+        </div>
+      {% endif %}
     </div>
     {% endif %}
   </div>
   <script id="serverResultsData" type="application/json">{{ results|tojson if results else 'null' }}</script>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay"><div class="spinner" aria-label="Loading"></div></div>
 
   <!-- Download Report Button -->
 <div class="result-card" style="text-align:center; margin-top:20px;">
@@ -587,25 +598,73 @@ function populateSampleResults(_) {}
 
 // Upload-only: show preview when choosing a file
 (function(){
+  const form = document.getElementById('photoForm');
+  const sourceSelect = document.getElementById('sourceSelect');
+  const devicePicker = document.getElementById('devicePicker');
   const fileInput = document.getElementById('image');
-  if(!fileInput) return;
-  fileInput.addEventListener('change', () => {
+  const snapshotUrl = document.getElementById('snapshot_url');
+  const loadingOverlay = document.getElementById('loadingOverlay');
+  const checkBtn = document.getElementById('checkBtn');
+
+  function onSourceChange(){
+    const src = sourceSelect.value;
+    if(src === 'device'){
+      devicePicker.style.display = 'block';
+      // Allow selecting a file
+      if(fileInput){ fileInput.disabled = false; fileInput.value = ''; }
+    } else {
+      devicePicker.style.display = 'none';
+      // Prevent accidental file submission
+      if(fileInput){ fileInput.disabled = true; fileInput.value = ''; }
+    }
+  }
+
+  // Preview for device file
+  if(fileInput){
+    fileInput.addEventListener('change', () => {
     const f = fileInput.files && fileInput.files[0];
-    if(!f) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-      const previewHolderId = 'previewHolder';
-      let holder = document.getElementById(previewHolderId);
-      if(!holder){
-        holder = document.createElement('div');
-        holder.id = previewHolderId;
-        holder.style.marginTop = '10px';
-        fileInput.parentElement.appendChild(holder);
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const previewHolderId = 'previewHolder';
+        let holder = document.getElementById(previewHolderId);
+        if(!holder){
+          holder = document.createElement('div');
+          holder.id = previewHolderId;
+          holder.style.marginTop = '10px';
+          devicePicker.appendChild(holder);
+        }
+        holder.innerHTML = '<label>Preview:</label><img style="width:100%; max-height:260px; object-fit:contain; border:1px solid #eee; border-radius:8px;" src="'+e.target.result+'"/>';
+      };
+      reader.readAsDataURL(f);
+    });
+  }
+
+  if(form){
+    form.addEventListener('submit', function(e){
+      const src = sourceSelect.value;
+      if(src === 'device'){
+        if(!fileInput.files.length){
+          e.preventDefault();
+          alert('Please select an image file.');
+          return false;
+        }
+      } else if(src === 'esp32'){
+        // Ensure snapshot_url exists; backend /check_product will fetch and process
+        if(!snapshotUrl || !snapshotUrl.value){
+        e.preventDefault();
+          alert('ESP32 snapshot URL is not configured.');
+        return false;
       }
-      holder.innerHTML = '<label>Preview:</label><img style="width:100%; max-height:260px; object-fit:contain; border:1px solid #eee; border-radius:8px;" src="'+e.target.result+'"/>';
-    };
-    reader.readAsDataURL(f);
-  });
+      }
+      // Show loading overlay and prevent double submit
+      if(loadingOverlay){ loadingOverlay.style.display = 'flex'; }
+      if(checkBtn){ checkBtn.disabled = true; checkBtn.textContent = 'Processing...'; }
+    });
+  }
+
+  if(sourceSelect){ sourceSelect.addEventListener('change', onSourceChange); }
+  onSourceChange();
 })();
 
 // -----------------------------
