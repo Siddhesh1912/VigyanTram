@@ -1,0 +1,174 @@
+{
+  "categories": {
+    "Electronics": {
+      "Mobile Phones": {
+        "rules": {
+          "Name & Address of Manufacturer/Importer": {
+            "priority": "High",
+            "description": "Full postal address of the manufacturer, packer, or importer is required for accountability."
+          },
+          "Common/Generic Name of Commodity": {
+            "priority": "High",
+            "description": "The product name must be clear and unambiguous for the customer."
+          },
+          "Net Quantity": {
+            "priority": "High",
+            "description": "The weight/number of items must follow standard units (e.g., pieces, kg) as per Legal Metrology."
+          },
+          "Retail Sale Price (MRP)": {
+            "priority": "High",
+            "description": "Price including all taxes in Indian Rupees (₹) must be clearly displayed."
+          },
+          "Date of Manufacture/Import": {
+            "priority": "Medium",
+            "description": "Shows product age; required for warranty and traceability."
+          },
+          "Consumer Care Details": {
+            "priority": "Medium",
+            "description": "Contact number or email for customer support must be provided."
+          },
+          "Country of Origin": {
+            "priority": "High",
+            "description": "Mandatory for imported goods to identify origin."
+          },
+          "Technical Specs": {
+            "priority": "Low",
+            "description": "Optional technical details that may help customers but not legally required."
+          },
+          "Warranty Info": {
+            "priority": "Low",
+            "description": "Warranty duration and terms may be added for customer clarity."
+          }
+        }
+      },
+      "Laptop": {
+        "rules": {
+          "Name & Address of Manufacturer/Importer": {
+            "priority": "High",
+            "description": "Full postal address of the manufacturer, packer, or importer is required."
+          },
+          "Common/Generic Name of Commodity": {
+            "priority": "High",
+            "description": "Clear and unambiguous product name."
+          },
+          "Net Quantity": {
+            "priority": "High",
+            "description": "Weight or number of items as per Legal Metrology standard units."
+          },
+          "Retail Sale Price (MRP)": {
+            "priority": "High",
+            "description": "MRP including taxes in Indian Rupees (₹)."
+          },
+          "Date of Manufacture/Import": {
+            "priority": "Medium",
+            "description": "Manufacture or import date to track age and warranty."
+          },
+          "Consumer Care Details": {
+            "priority": "Medium",
+            "description": "Customer support contact info is mandatory."
+          },
+          "Country of Origin": {
+            "priority": "High",
+            "description": "Identify whether the product is domestic or imported."
+          },
+          "Technical Specs": {
+            "priority": "Low",
+            "description": "Optional specs like RAM, processor, etc."
+          },
+          "Warranty Info": {
+            "priority": "Low",
+            "description": "Warranty period and coverage info."
+          }
+        }
+      }
+    },
+    "Cosmetics": {
+      "Lipstick": {
+        "rules": {
+          "Name & Address of Manufacturer/Importer": {
+            "priority": "High",
+            "description": "Required for accountability and traceability."
+          },
+          "Common/Generic Name of Commodity": {
+            "priority": "High",
+            "description": "Product name must be clear for consumers."
+          },
+          "Net Quantity": {
+            "priority": "High",
+            "description": "Weight/volume must follow standard units (g, ml)."
+          },
+          "Retail Sale Price (MRP)": {
+            "priority": "High",
+            "description": "Price including taxes in INR."
+          },
+          "Date of Manufacture/Import": {
+            "priority": "Medium",
+            "description": "Used to track product age and quality."
+          },
+          "Consumer Care Details": {
+            "priority": "Medium",
+            "description": "Customer support contact must be provided."
+          },
+          "Country of Origin": {
+            "priority": "High",
+            "description": "Mandatory for imported cosmetic products."
+          },
+          "Ingredients List": {
+            "priority": "Medium",
+            "description": "List of ingredients must be visible for safety and compliance."
+          },
+          "Expiry Date": {
+            "priority": "High",
+            "description": "Indicates product usability; legally required."
+          }
+        }
+      }
+    },
+    "Packaged Food": {
+      "Protein Powder": {
+        "rules": {
+          "Name & Address of Manufacturer/Importer": {
+            "priority": "High",
+            "description": "Mandatory to track accountability."
+          },
+          "Common/Generic Name of Commodity": {
+            "priority": "High",
+            "description": "Clear product name for consumer awareness."
+          },
+          "Net Quantity": {
+            "priority": "High",
+            "description": "Weight in standard units (kg/g) as per Legal Metrology."
+          },
+          "Retail Sale Price (MRP)": {
+            "priority": "High",
+            "description": "Price inclusive of taxes in INR."
+          },
+          "Date of Manufacture/Import": {
+            "priority": "Medium",
+            "description": "Helps identify freshness and shelf life."
+          },
+          "Consumer Care Details": {
+            "priority": "Medium",
+            "description": "Contact info for complaints or queries."
+          },
+          "Country of Origin": {
+            "priority": "High",
+            "description": "Mandatory if imported."
+          },
+          "Ingredients List": {
+            "priority": "High",
+            "description": "Mandatory to display all ingredients for health safety."
+          },
+          "Nutritional Info": {
+            "priority": "Medium",
+            "description": "Optional, but recommended for consumer awareness."
+          },
+          "Expiry Date / Best Before": {
+            "priority": "High",
+            "description": "Legally required for packaged food safety."
+          }
+        }
+      }
+    }
+  }
+}

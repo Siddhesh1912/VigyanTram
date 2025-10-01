@@ -3,9 +3,8 @@ import requests, os, sqlite3
 from bs4 import BeautifulSoup
 from werkzeug.utils import secure_filename
 from datetime import datetime
-import pytesseract
 from PIL import Image, ImageDraw, ImageFont
-from PIL import ImageFile, ImageFilter, ImageOps
+from PIL import ImageFile
 from PIL import UnidentifiedImageError
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
@@ -15,20 +14,19 @@ from io import BytesIO
 import difflib
 import re
 
-# Prefer explicit Tesseract path on Windows per user setup
-try:
-    if os.name == 'nt':
-        t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-        if os.path.exists(t_path):
-            pytesseract.pytesseract.tesseract_cmd = t_path
-except Exception as _e:
-    print("Warning: could not set Tesseract path:", _e)
+
+"""Flask app for product monitoring and compliance checks."""
 
 # -----------------------------
 # Flask App Setup
 # -----------------------------
 app = Flask(__name__)
 app.secret_key = "your_secret_key"   # Required for sessions
+
+# Serve rules.json for frontend fetch
+@app.route('/rules.json')
+def serve_rules_json():
+    return send_file('rules.json', mimetype='application/json')
 
 UPLOAD_FOLDER = "static/uploads"
 PROCESSED_FOLDER = "static/processed"
@@ -49,7 +47,6 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 ESP32_STREAM_URL = "http://192.168.0.123:81/stream"
 ESP32_SNAPSHOT_URL = "http://10.219.158.90/capture"
 CSV_LOG_PATH = "img.csv"
-
 # -----------------------------
 # DB Helper
 # -----------------------------
@@ -353,6 +350,80 @@ def product_monitoring():
                          esp32_snapshot_url=ESP32_SNAPSHOT_URL,
                          last_snapshot_url=last_snapshot_url)
 
+@app.route("/scrape_category", methods=["POST"])
+@login_required
+def scrape_category():
+    category = request.form.get("category", "").strip().lower()
+    time_filter = request.form.get("time", "").strip().lower()
+    try:
+        # Use Playwright-based scraper for robustness
+        items = scrape_category_sync(category, max_pages=1)
+        csv_path, count = write_scraped_csv(items, os.path.join("data", "scraped_info.csv"))
+        return jsonify({
+            "status": "success",
+            "count": count,
+            "csv": f"/data/{os.path.basename(csv_path)}",
+            "items": items[:20]
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/scrape_categories", methods=["POST"])
+@login_required
+def scrape_categories():
+    # Accept either JSON {categories: [..], max_pages} or form with comma-separated 'categories'
+    categories = []
+    max_pages = 1
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        categories = payload.get("categories") or []
+        max_pages = int(payload.get("max_pages") or 1)
+    else:
+        cats = request.form.get("categories") or request.form.get("category") or ""
+        categories = [c.strip().lower() for c in cats.split(",") if c.strip()]
+        mp = request.form.get("max_pages")
+        if mp:
+            try:
+                max_pages = int(mp)
+            except ValueError:
+                max_pages = 1
+
+    if not categories:
+        # Default to all known categories
+        categories = ["protein", "mobile", "laptop"]
+
+    try:
+        all_items = []
+        for cat in categories:
+            items = scrape_category_sync(cat, max_pages=max_pages)
+            # Tag category on each item
+            for it in items:
+                it["category"] = cat
+            all_items.extend(items)
+
+        csv_path, count = write_scraped_csv(all_items, os.path.join("data", "scraped_info.csv"))
+        # Return small preview grouped by category
+        preview = {}
+        for it in all_items:
+            k = it.get("category") or "unknown"
+            preview.setdefault(k, [])
+            if len(preview[k]) < 5:
+                preview[k].append({
+                    "name": it.get("name", ""),
+                    "price": it.get("price", ""),
+                    "details": it.get("details", ""),
+                    "product_link": it.get("product_link", ""),
+                })
+        return jsonify({
+            "status": "success",
+            "count": count,
+            "csv": f"/data/{os.path.basename(csv_path)}",
+            "categories": categories,
+            "preview": preview
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @app.route("/check_product", methods=["POST"])
 @login_required
 def check_product():
@@ -416,8 +487,7 @@ def check_product():
 
         # Try to open the image robustly
         try:
-            pil_img = Image.open(filepath)
-            pil_img.load()  # force loading to catch issues early
+            pil_img = open_image_or_error(filepath)
         except UnidentifiedImageError:
             # Gracefully report invalid image and return page
             results["compliant"] = False
@@ -439,32 +509,19 @@ def check_product():
                                    esp32_snapshot_url=ESP32_SNAPSHOT_URL,
                                    last_snapshot_url=last_snapshot_url)
 
-        # OCR with Pillow-only preprocessing (no OpenCV dependency)
+        # OCR using helper module
         try:
-            pil_gray = pil_img.convert('L')
-            w, h = pil_gray.size
-            pil_gray = pil_gray.resize((w*2, h*2))
-            pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
-            pil_autocontrast = ImageOps.autocontrast(pil_blur)
-            # Simple threshold to boost contrast
-            pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
-            text = pytesseract.image_to_string(pil_thresh, config='--oem 3 --psm 6')
-            processed_image_for_save = pil_thresh
-        except Exception as _pe:
-            print('Pillow preprocess error:', _pe)
-            try:
-                text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
-                processed_image_for_save = pil_img
-            except Exception as _pe2:
-                print('OCR fallback error:', _pe2)
-                results["compliant"] = False
-                results["data"] = {"issue": "OCR failed on the uploaded image."}
-                last_snapshot_rel = session.get("last_snapshot_rel")
-                last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
-                return render_template("product_monitoring.html", results=results,
-                                       esp32_stream_url=ESP32_STREAM_URL,
-                                       esp32_snapshot_url=ESP32_SNAPSHOT_URL,
-                                       last_snapshot_url=last_snapshot_url)
+            text, processed_image_for_save = perform_ocr(pil_img)
+        except Exception as _ocr_e:
+            print('OCR error:', _ocr_e)
+            results["compliant"] = False
+            results["data"] = {"issue": "OCR failed on the uploaded image."}
+            last_snapshot_rel = session.get("last_snapshot_rel")
+            last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+            return render_template("product_monitoring.html", results=results,
+                                   esp32_stream_url=ESP32_STREAM_URL,
+                                   esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                                   last_snapshot_url=last_snapshot_url)
 
         # Extract data from OCR text and validate against CSV data
         # Extract email if present
@@ -625,21 +682,15 @@ def check_product():
                 f.write(resp.content)
             results["filename"] = to_url_path(filepath)
 
-            # OCR with fast preprocessing (align with upload flow)
+            # OCR using helper module
             try:
-                pil_img = Image.open(filepath)
-                pil_img.load()
-                pil_gray = pil_img.convert('L')
-                w, h = pil_gray.size
-                pil_gray = pil_gray.resize((max(1, w*2), max(1, h*2)))
-                pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
-                pil_autocontrast = ImageOps.autocontrast(pil_blur)
-                pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
-                text = pytesseract.image_to_string(pil_thresh, config='--oem 3 --psm 6')
-                processed_image_for_save = pil_thresh
-            except Exception:
-                text = pytesseract.image_to_string(Image.open(filepath), config='--oem 3 --psm 6')
-                processed_image_for_save = Image.open(filepath)
+                pil_img = open_image_or_error(filepath)
+                text, processed_image_for_save = perform_ocr(pil_img)
+            except Exception as _ocr2_e:
+                results["compliant"] = False
+                results["data"] = {"issue": f"OCR failed: {_ocr2_e}"}
+                text = ""
+                processed_image_for_save = pil_img if 'pil_img' in locals() else Image.open(filepath)
 
             extracted_data = {
                 "product": "ESP32 Snapshot",
@@ -825,19 +876,12 @@ def capture_and_check():
         results["filename"] = to_url_path(save_path)
         session["last_snapshot_rel"] = f"uploads/{filename}"
 
-        # OCR preprocessing and extraction (reuse logic similar to upload branch)
-        pil_img = Image.open(save_path)
+        # OCR preprocessing and extraction via helper
+        pil_img = open_image_or_error(save_path)
         try:
-            pil_gray = pil_img.convert('L')
-            w, h = pil_gray.size
-            pil_gray = pil_gray.resize((w*2, h*2))
-            pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
-            pil_autocontrast = ImageOps.autocontrast(pil_blur)
-            pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
-            text = pytesseract.image_to_string(pil_thresh, config='--oem 3 --psm 6')
-            processed_image_for_save = pil_thresh
-        except Exception:
-            text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
+            text, processed_image_for_save = perform_ocr(pil_img)
+        except Exception as _ocr3_e:
+            text = ""
             processed_image_for_save = pil_img
 
         # Extract email if present

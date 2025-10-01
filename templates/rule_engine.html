@@ -151,23 +151,6 @@
     <div class="card"><h2 id="inactiveRules">32</h2><p>Inactive Rules</p></div>
   </div>
 
-  <div class="filters">
-    <input type="text" placeholder="Search Rule Name or Description">
-    <select>
-      <option value="">All Severity</option>
-      <option value="High">High</option>
-      <option value="Medium">Medium</option>
-      <option value="Low">Low</option>
-    </select>
-    <select>
-      <option value="">All Categories</option>
-      <option value="Labeling">Labeling</option>
-      <option value="MRP">MRP</option>
-      <option value="Net Quantity">Net Quantity</option>
-      <option value="Consumer Care">Consumer Care</option>
-    </select>
-    <button>Filter</button>
-  </div>
 
   <div class="table-container">
     <table id="rulesTable">
@@ -198,156 +181,16 @@ window.onclick = function(event){
   }
 }
 
-// Load CSV data and update rule engine
-async function loadRuleEngineData() {
-  try {
-    // Load CSV data
-    const [mobileResponse, laptopResponse, proteinResponse] = await Promise.all([
-      fetch('/data/mobile.csv'),
-      fetch('/data/laptop.csv'),
-      fetch('/data/protein.csv')
-    ]);
-    
-    const mobileText = await mobileResponse.text();
-    const laptopText = await laptopResponse.text();
-    const proteinText = await proteinResponse.text();
-    
-    // Parse CSV data
-    const mobileData = parseCSV(mobileText);
-    const laptopData = parseCSV(laptopText);
-    const proteinData = parseCSV(proteinText);
-    
-    // Calculate statistics
-    const totalProducts = mobileData.length + laptopData.length + proteinData.length;
-    const totalViolations = Math.floor(totalProducts * 0.16);
-    
-    // Update cards
-    document.getElementById('totalRules').textContent = '152';
-    document.getElementById('activeRules').textContent = '120';
-    document.getElementById('inactiveRules').textContent = '32';
-    
-    // Generate rules based on CSV data analysis
-    const rules = generateRulesFromCSV(mobileData, laptopData, proteinData);
-    populateRulesTable(rules);
-    
-  } catch (error) {
-    console.error('Error loading rule engine data:', error);
-    // Fallback to default rules
-    const defaultRules = [
-      {
-        name: "Mandatory MRP Display",
-        description: "All packaged products must display MRP",
-        severity: "High",
-        status: "Enabled",
-        source: "Govt Gazette"
-      },
-      {
-        name: "Labeling Requirements",
-        description: "Products must include manufacturer and net quantity",
-        severity: "Medium",
-        status: "Enabled",
-        source: "Govt Gazette"
-      },
-      {
-        name: "Consumer Care Number",
-        description: "All products must display valid consumer care number",
-        severity: "Low",
-        status: "Disabled",
-        source: "Govt Gazette"
-      },
-      {
-        name: "Expiry Date Labeling",
-        description: "Products with shelf-life must show expiry date",
-        severity: "High",
-        status: "Enabled",
-        source: "Govt Gazette"
-      }
-    ];
-    populateRulesTable(defaultRules);
-  }
-}
+// Load rules from rules.json
+let METROLOGY_RULES = null;
 
-// Parse CSV function
-function parseCSV(csvText) {
-  const lines = csvText.split('\n');
-  const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim());
-  const data = [];
-  
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim()) {
-      const values = lines[i].split(',').map(v => v.replace(/"/g, '').trim());
-      const row = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-      data.push(row);
-    }
-  }
-  return data;
-}
-
-// Generate rules based on CSV data analysis
-function generateRulesFromCSV(mobileData, laptopData, proteinData) {
-  const rules = [];
-  
-  // Rule 1: Price Information
-  rules.push({
-    name: "Price Information Display",
-    description: "All products must display clear pricing information",
-    severity: "High",
-    status: "Enabled",
-    source: "Legal Metrology Act"
-  });
-  
-  // Rule 2: Product Details
-  rules.push({
-    name: "Product Specification Requirements",
-    description: "Products must include detailed specifications and features",
-    severity: "Medium",
-    status: "Enabled",
-    source: "Consumer Protection Act"
-  });
-  
-  // Rule 3: Image Quality
-  rules.push({
-    name: "Product Image Standards",
-    description: "Product images must be clear and show actual product",
-    severity: "Medium",
-    status: "Enabled",
-    source: "E-commerce Guidelines"
-  });
-  
-  // Rule 4: Link Validation
-  rules.push({
-    name: "Product Link Validation",
-    description: "All product links must be valid and accessible",
-    severity: "Low",
-    status: "Enabled",
-    source: "Digital Commerce Rules"
-  });
-  
-  // Rule 5: Category Classification
-  rules.push({
-    name: "Product Category Classification",
-    description: "Products must be properly categorized for compliance checking",
-    severity: "High",
-    status: "Enabled",
-    source: "Legal Metrology Act"
-  });
-  
-  return rules;
-}
-
-// Populate rules table
 function populateRulesTable(rules) {
   const tbody = document.getElementById('rulesTableBody');
   tbody.innerHTML = '';
-  
   rules.forEach(rule => {
     const row = document.createElement('tr');
     const severityClass = `severity-${rule.severity.toLowerCase()}`;
     const statusClass = rule.status === 'Enabled' ? 'status-enabled' : 'status-disabled';
-    
     row.innerHTML = `
       <td>${rule.name}</td>
       <td>${rule.description}</td>
@@ -359,8 +202,101 @@ function populateRulesTable(rules) {
   });
 }
 
-// Load rule engine data when page loads
-loadRuleEngineData();
+// Dropdown logic for category selection
+// Show rules for selected category and product
+function showCategoryRules(category, product) {
+  let rules = [];
+  if (METROLOGY_RULES && METROLOGY_RULES.categories[category] && METROLOGY_RULES.categories[category][product]) {
+    const ruleObj = METROLOGY_RULES.categories[category][product].rules;
+    rules = Object.entries(ruleObj).map(([name, obj]) => ({
+      name,
+      description: obj.description || '',
+      severity: obj.priority || '',
+      status: 'Enabled',
+      source: `${category} / ${product}`
+    }));
+  }
+  populateRulesTable(rules);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Load rules.json and build selectors after fetch
+  fetch('/rules.json')
+    .then(res => res.json())
+    .then(data => {
+      METROLOGY_RULES = data;
+      const selectorDiv = document.createElement('div');
+      selectorDiv.style.textAlign = 'center';
+      selectorDiv.style.marginBottom = '24px';
+
+      // Category dropdown
+      const categorySelector = document.createElement('select');
+      categorySelector.id = 'categorySelector';
+      categorySelector.style.marginRight = '18px';
+      categorySelector.style.fontWeight = 'bold';
+      categorySelector.style.fontSize = '18px';
+      categorySelector.style.padding = '10px 24px';
+      categorySelector.style.background = '#2F3C7E';
+      categorySelector.style.color = '#fff';
+      categorySelector.style.border = 'none';
+      categorySelector.style.borderRadius = '8px';
+      categorySelector.style.cursor = 'pointer';
+      for (const cat in METROLOGY_RULES.categories) {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        categorySelector.appendChild(opt);
+      }
+      selectorDiv.appendChild(categorySelector);
+
+      // Product dropdown
+      const productSelector = document.createElement('select');
+      productSelector.id = 'productSelector';
+      productSelector.style.marginRight = '18px';
+      productSelector.style.fontWeight = 'bold';
+      productSelector.style.fontSize = '18px';
+      productSelector.style.padding = '10px 24px';
+      productSelector.style.background = '#70C1B3';
+      productSelector.style.color = '#fff';
+      productSelector.style.border = 'none';
+      productSelector.style.borderRadius = '8px';
+      productSelector.style.cursor = 'pointer';
+      selectorDiv.appendChild(productSelector);
+
+      // Insert selectors above the table
+      const contentDiv = document.querySelector('.content');
+      const cardsDiv = contentDiv.querySelector('.cards');
+      cardsDiv.insertAdjacentElement('afterend', selectorDiv);
+
+      // Populate products for selected category
+      function updateProductOptions() {
+        const cat = categorySelector.value;
+        productSelector.innerHTML = '';
+        if (METROLOGY_RULES.categories[cat]) {
+          for (const prod in METROLOGY_RULES.categories[cat]) {
+            const opt = document.createElement('option');
+            opt.value = prod;
+            opt.textContent = prod;
+            productSelector.appendChild(opt);
+          }
+        }
+        // Show rules for first product
+        if (productSelector.options.length > 0) {
+          showCategoryRules(cat, productSelector.value);
+        } else {
+          populateRulesTable([]);
+        }
+      }
+
+      categorySelector.addEventListener('change', updateProductOptions);
+      productSelector.addEventListener('change', function() {
+        showCategoryRules(categorySelector.value, productSelector.value);
+      });
+
+      // Initial load
+      updateProductOptions();
+    });
+});
 </script>
 </body>
 </html>

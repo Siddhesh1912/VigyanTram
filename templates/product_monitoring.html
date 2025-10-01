@@ -694,3 +694,31 @@ document.addEventListener('click', function(e){
 
 </body>
 </html>
+
+// -----------------------------
+// Render server results if provided
+// -----------------------------
+// Server results are rendered by Jinja; suppress client-side duplication
+</script>
+
+<!-- Simple image preview modal -->
+<div id="imgModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:2000; align-items:center; justify-content:center;">
+  <img id="imgModalContent" src="" alt="Preview" style="max-width:90vw; max-height:90vh; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.5);" />
+</div>
+
+<script>
+// click-to-zoom for processed/captured images
+document.addEventListener('click', function(e){
+  if(e.target && e.target.matches('img[data-preview]')){
+    const modal = document.getElementById('imgModal');
+    const modalImg = document.getElementById('imgModalContent');
+    modalImg.src = e.target.src;
+    modal.style.display = 'flex';
+  } else if(e.target && (e.target.id === 'imgModal' || e.target.id === 'imgModalContent')){
+    document.getElementById('imgModal').style.display = 'none';
+  }
+});
+</script>
+
+</body>
+</html>
