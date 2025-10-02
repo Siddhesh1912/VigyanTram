@@ -373,12 +373,14 @@
     <div class="result-card">
       <h3>Processing Result</h3>
       {% if results.data %}
-        <p><strong>product:</strong> {{ results.data.product or 'Uploaded Product' }}</p>
-        <p><strong>mrp:</strong> {{ results.data.mrp or 'Not Found' }}</p>
-        <p><strong>net_quantity:</strong> {{ results.data.net_quantity or 'Not Found' }}</p>
-        <p><strong>manufacturer:</strong> {{ results.data.manufacturer or 'Not Found' }}</p>
-        <p><strong>country:</strong> {{ results.data.country or 'Not Found' }}</p>
-        <p><strong>care:</strong> {{ results.data.care or 'Not Found' }}</p>
+  <p><strong>Manufacturer / Packer / Importer:</strong> {{ results.data.manufacturer or 'Not Found' }}</p>
+  <p><strong>Address:</strong> {{ results.data.address or 'Not Found' }}</p>
+  <p><strong>Commodity Name:</strong> {{ results.data.commodity or 'Not Found' }}</p>
+  <p><strong>Net Quantity:</strong> {{ results.data.net_quantity or 'Not Found' }}</p>
+  <p><strong>MRP (₹):</strong> {{ results.data.mrp or 'Not Found' }}</p>
+  <p><strong>Date of Manufacture / Import:</strong> {{ results.data.date or 'Not Found' }}</p>
+  <p><strong>Consumer Care Details:</strong> {{ results.data.consumer_care or 'Not Found' }}</p>
+  <p><strong>Country of Origin:</strong> {{ results.data.origin or 'Not Found' }}</p>
         {% if results.data.issue %}
           <p><strong>issue:</strong> {{ results.data.issue }}</p>
       {% endif %}
@@ -417,13 +419,18 @@
         <div style="display:flex; gap:10px; align-items:flex-start; margin-top:12px;">
           {% if results.filename %}
             <div style="flex:0 0 auto; width:32%;">
-              <img data-preview src="/{{ results.filename }}" alt="Captured" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <img data-preview src="{{ results.filename.lstrip('/') }}" alt="Captured" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
               <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Captured</div>
             </div>
           {% endif %}
           {% if results.processed_file %}
             <div style="flex:0 0 auto; width:32%;">
-              <img data-preview src="/{{ results.processed_file }}" alt="Processed" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <img data-preview src="{{ results.processed_file.lstrip('/') }}" alt="Processed" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Processed</div>
+            </div>
+          {% else %}
+            <div style="flex:0 0 auto; width:32%; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <div style="width:100%; height:180px; background:#eee; border-radius:8px; display:flex; align-items:center; justify-content:center; color:#888; font-size:16px;">No processed image available</div>
               <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Processed</div>
             </div>
           {% endif %}

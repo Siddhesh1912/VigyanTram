@@ -12,6 +12,11 @@ from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
 from io import BytesIO
 import difflib
+import cv2
+import pytesseract
+from PIL import Image, ImageOps, ImageFilter
+import numpy as np
+from ocr_processing import preprocess_for_ocr
 import re
 
 
@@ -21,6 +26,10 @@ import re
 # Flask App Setup
 # -----------------------------
 app = Flask(__name__)
+if os.name == 'nt':
+    t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+    if os.path.exists(t_path):
+        pytesseract.pytesseract.tesseract_cmd = t_path
 app.secret_key = "your_secret_key"   # Required for sessions
 
 # Serve rules.json for frontend fetch
@@ -427,249 +436,108 @@ def scrape_categories():
 @app.route("/check_product", methods=["POST"])
 @login_required
 def check_product():
-    url = request.form.get("url")
     image = request.files.get("image")
     snapshot_url = request.form.get("snapshot_url")
+    results = {"filename": None, "processed_file": None, "data": {}}
 
-    results = {"url": url, "filename": None, "processed_file": None, "data": {}, "compliant": True}
+    def preprocess_image(image_path):
+        try:
+            pil_img = Image.open(image_path)
+            pil_img = preprocess_for_ocr(pil_img)
+            # Save processed image to static/processed
+            base = os.path.basename(image_path)
+            name, ext = os.path.splitext(base)
+            processed_name = f"{name}_processed{ext}"
+            processed_path = os.path.join(PROCESSED_FOLDER, processed_name)
+            pil_img.save(processed_path)
+            print(f"[DEBUG] Processed image saved: {processed_path}")
+            return processed_path
+        except Exception as e:
+            print(f"[ERROR] Failed to preprocess image: {e}")
+            return None
 
-    # --- CASE 1: URL provided ---
-    if url:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        page = requests.get(url, headers=headers)
-        soup = BeautifulSoup(page.text, "html.parser")
-
-        title = soup.select_one("#productTitle")
-        mrp = soup.select_one(".a-price .a-offscreen")
-        img = soup.select_one("#landingImage")
-
-        results["data"] = {
-            "product": title.get_text(strip=True) if title else "Unknown Product",
-            "mrp": mrp.get_text(strip=True) if mrp else "Not Found",
-            "net_quantity": "Not Found",
-            "manufacturer": "Not Found",
-            "country": "Not Found",
-            "care": "Not Found"
+    def extract_text_fields(image_path):
+        processed_path = preprocess_image(image_path)
+        if not processed_path or not os.path.exists(processed_path):
+            print(f"[ERROR] Processed image not found: {processed_path}")
+            return {
+                'product': 'Not Found',
+                'mrp': 'Not Found',
+                'expiry': 'Not Found',
+                'origin': 'Not Found',
+                'processed_file': ''
+            }
+        img = cv2.imread(processed_path)
+        text = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
+        print(f"[DEBUG] OCR text: {text}")
+        # Manufacturer/Importer/Packer Name & Address
+        manufacturer = re.search(r'(?:Manufacturer|Packer|Importer)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
+        address = re.search(r'(?:Address|Addr)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
+        # Commodity Name
+        commodity = re.search(r'(?:Commodity|Product|Item|Generic Name)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
+        # Net Quantity
+        net_qty = re.search(r'(?:Net Quantity|Net Qty|Quantity)[^\n]*[:\- ]*([\d.,]+\s*(kg|g|l|ml|pcs|piece|tablet|capsule|pack|number)?)', text, re.IGNORECASE)
+        # MRP
+        mrp = re.search(r'(?:MRP|Price|Retail Sale Price)[^\n]*[:\- ₹Rs]*([\d,.]+)', text, re.IGNORECASE)
+        # Date of Manufacture/Import
+        date = re.search(r'(?:Date of (?:Manufacture|Import)|Mfg Date|Packed on|Best before|Use by)[^\n]*[:\- ]*([\d]{2}[\/\-][\d]{2}[\/\-][\d]{4})', text, re.IGNORECASE)
+        # Consumer Care Details
+        consumer_care = re.search(r'(?:Consumer Care|Customer Care|Contact)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
+        # Country of Origin
+        origin = re.search(r'(?:Country of Origin|Origin)[^\n]*[:\- ]*([A-Za-z ]+)', text, re.IGNORECASE)
+        return {
+            'manufacturer': manufacturer.group(1).strip() if manufacturer else 'Not Found',
+            'address': address.group(1).strip() if address else 'Not Found',
+            'commodity': commodity.group(1).strip() if commodity else 'Not Found',
+            'net_quantity': net_qty.group(1).strip() if net_qty else 'Not Found',
+            'mrp': mrp.group(1).strip() if mrp else 'Not Found',
+            'date': date.group(1).strip() if date else 'Not Found',
+            'consumer_care': consumer_care.group(1).strip() if consumer_care else 'Not Found',
+            'origin': origin.group(1).strip() if origin else 'Not Found',
+            'processed_file': processed_path
         }
 
-        if img and img.get("src"):
-            results["filename"] = img["src"]
-
-        # Compliance decision based on presence of mandatory fields
-        # Evaluate rule engine
-        compliant, issues = evaluate_legal_metrology_rules(results["data"])
-        results["compliant"] = compliant
-        if not compliant:
-            results["data"]["issue"] = "; ".join(issues)
-
-        run_query('''INSERT INTO products
-            (title, brand, seller, category, scanned_at, source_url,
-             mrp, net_qty, manufacturer, country_of_origin, consumer_care, raw_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (results["data"]["product"], None, None, None, datetime.now().isoformat(),
-             url, results["data"]["mrp"], results["data"]["net_quantity"],
-             results["data"]["manufacturer"], results["data"]["country"],
-             results["data"]["care"], ""))
-
-        product_id = run_query("SELECT last_insert_rowid()", fetch=True)[0][0]
-
-        if not results["compliant"]:
-            run_query('''INSERT INTO violations (product_id, issue, severity, detected_at)
-                         VALUES (?, ?, ?, ?)''',
-                      (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
-
-    # --- CASE 2: Image uploaded ---
-    elif image and getattr(image, 'filename', ''):
+    # Handle file upload
+    if image and getattr(image, 'filename', ''):
         filename = secure_filename(image.filename)
         filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
         image.save(filepath)
-        results["filename"] = to_url_path(filepath)
-
-        # Try to open the image robustly
-        try:
-            pil_img = open_image_or_error(filepath)
-        except UnidentifiedImageError:
-            # Gracefully report invalid image and return page
-            results["compliant"] = False
-            results["data"] = {"issue": "Invalid or corrupted image. Please recapture or upload a valid image."}
-            last_snapshot_rel = session.get("last_snapshot_rel")
-            last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
-            return render_template("product_monitoring.html", results=results,
-                                   esp32_stream_url=ESP32_STREAM_URL,
-                                   esp32_snapshot_url=ESP32_SNAPSHOT_URL,
-                                   last_snapshot_url=last_snapshot_url)
-        except Exception as _open_e:
-            print('Image open error:', _open_e)
-            results["compliant"] = False
-            results["data"] = {"issue": "Unable to read the uploaded image."}
-            last_snapshot_rel = session.get("last_snapshot_rel")
-            last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
-            return render_template("product_monitoring.html", results=results,
-                                   esp32_stream_url=ESP32_STREAM_URL,
-                                   esp32_snapshot_url=ESP32_SNAPSHOT_URL,
-                                   last_snapshot_url=last_snapshot_url)
-
-        # OCR using helper module
-        try:
-            text, processed_image_for_save = perform_ocr(pil_img)
-        except Exception as _ocr_e:
-            print('OCR error:', _ocr_e)
-            results["compliant"] = False
-            results["data"] = {"issue": "OCR failed on the uploaded image."}
-            last_snapshot_rel = session.get("last_snapshot_rel")
-            last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
-            return render_template("product_monitoring.html", results=results,
-                                   esp32_stream_url=ESP32_STREAM_URL,
-                                   esp32_snapshot_url=ESP32_SNAPSHOT_URL,
-                                   last_snapshot_url=last_snapshot_url)
-
-        # Extract data from OCR text and validate against CSV data
-        # Extract email if present
-        try:
-            email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", text)
-            care_email = email_match.group(0) if email_match else None
-        except Exception:
-            care_email = None
-
-        extracted_data = {
-            "product": "Uploaded Product",
-            "mrp": "₹" + text.split("MRP")[-1].split("\n")[0].strip() if "MRP" in text else "Not Found",
-            "net_quantity": "500g" if "500g" in text else "Not Found",
-            "manufacturer": "ABC Foods" if "ABC" in text else "Not Found",
-            "country": "India" if "India" in text else "Not Found",
-            "care": care_email or ("care@abc.com" if "@" in text else "Not Found")
+        print(f"[DEBUG] Uploaded image saved: {filepath}")
+        fields = extract_text_fields(filepath)
+        # Normalize processed image path for url_for
+        def to_web_path(p):
+            return p.replace('\\', '/').replace('\\', '/').replace('\\', '/') if p else p
+        processed_rel = to_web_path(os.path.relpath(fields['processed_file'], 'static')) if fields['processed_file'] else ''
+        results["filename"] = url_for('static', filename=to_web_path(os.path.relpath(filepath, 'static')))
+        results["processed_file"] = url_for('static', filename=processed_rel) if processed_rel else None
+        results["data"] = {
+            "manufacturer": fields.get('manufacturer', 'Not Found'),
+            "address": fields.get('address', 'Not Found'),
+            "commodity": fields.get('commodity', 'Not Found'),
+            "net_quantity": fields.get('net_quantity', 'Not Found'),
+            "mrp": fields.get('mrp', 'Not Found'),
+            "date": fields.get('date', 'Not Found'),
+            "consumer_care": fields.get('consumer_care', 'Not Found'),
+            "origin": fields.get('origin', 'Not Found')
         }
-        
-        # Prefer category-based matching first
-        guessed_cat = guess_category_from_text(text)
-        cat_products = get_products_by_category(guessed_cat)
-        matched_product, match_score = find_best_csv_match(text, cat_products)
-        if (not matched_product) or match_score < 0.90:
-            matched_product, match_score = find_best_csv_match(text, all_products)
-        if matched_product and match_score >= 0.90:
-            # Merge best-known fields from CSV
-            extracted_data.update({
-                "product": matched_product.get('name') or matched_product.get('Product Name') or extracted_data.get('product'),
-                "mrp": matched_product.get('price') or matched_product.get('Price') or extracted_data.get('mrp'),
-                "matched_from_csv": True,
-                "match_score": round(match_score * 100, 2)
-            })
-        
-        results["data"] = extracted_data
+        print(f"[DEBUG] Results: {results}")
+        if results["filename"]:
+            print(f"[DEBUG] Template Captured image URL: {results['filename']}")
+        if results["processed_file"]:
+            print(f"[DEBUG] Template Processed image URL: {results['processed_file']}")
+        last_snapshot_rel = session.get("last_snapshot_rel")
+        last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+        return render_template("product_monitoring.html", results=results,
+                               esp32_stream_url=ESP32_STREAM_URL,
+                               esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                               last_snapshot_url=last_snapshot_url)
 
-        if results["data"]["mrp"] == "Not Found" or results["data"]["country"] == "Not Found":
-            results["compliant"] = False
-            results["data"]["issue"] = "Missing mandatory fields"
-
-        processed_path = os.path.join(PROCESSED_FOLDER, "processed_" + filename)
-        try:
-            processed_image_for_save.save(processed_path)
-        except Exception as _se:
-            print('Processed save error:', _se)
-            Image.open(filepath).save(processed_path)
-        results["processed_file"] = to_url_path(processed_path)
-        results["raw_text"] = text
-
-        # Compute 50%+ similarity matches, prioritize guessed category
-        try:
-            top_matches = find_top_csv_matches(text, cat_products, min_ratio=0.50, limit=5)
-            if not top_matches:
-                top_matches = find_top_csv_matches(text, all_products, min_ratio=0.50, limit=5)
-        except Exception as _me:
-            print('Match computation error:', _me)
-            top_matches = []
-
-        # Prepare compact compare summary for UI
-        compare_summary = {
-            "threshold": 50,
-            "has_match": True if top_matches else False,
-            "top_matches": [
-                {
-                    "name": (m["product"].get('name') or m["product"].get('Product Name') or "Unnamed Product"),
-                    "price": (m["product"].get('price') or m["product"].get('Price') or "N/A"),
-                    "details": (m["product"].get('details') or m["product"].get('Details') or ""),
-                    "score_percent": m["score"]
-                }
-                for m in top_matches
-            ]
-        }
-        results["compare"] = compare_summary
-
-        run_query('''INSERT INTO products
-            (title, brand, seller, category, scanned_at, source_url,
-             mrp, net_qty, manufacturer, country_of_origin, consumer_care, raw_text)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-            (results["data"]["product"], None, None, None, datetime.now().isoformat(),
-             None, results["data"]["mrp"], results["data"]["net_quantity"],
-             results["data"]["manufacturer"], results["data"]["country"],
-             results["data"]["care"], text))
-
-        product_id = run_query("SELECT last_insert_rowid()", fetch=True)[0][0]
-        results["product_id"] = product_id  
-
-        if not results["compliant"]:
-            run_query('''INSERT INTO violations (product_id, issue, severity, detected_at)
-                         VALUES (?, ?, ?, ?)''',
-                      (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
-
-        # Append extracted data to CSV log
-        try:
-            csv_log_path = os.path.join("data", "captures.csv")
-            os.makedirs("data", exist_ok=True)
-            file_exists = os.path.exists(csv_log_path)
-            import csv as _csv
-            with open(csv_log_path, mode="a", newline="", encoding="utf-8") as f:
-                writer = _csv.writer(f)
-                if not file_exists:
-                    writer.writerow([
-                        "timestamp","filename","processed_file","product","mrp","net_quantity","manufacturer",
-                        "country","care","compliant","issue","product_id","raw_text_preview"
-                    ])
-                writer.writerow([
-                    datetime.now().isoformat(),
-                    results.get("filename"),
-                    results.get("processed_file"),
-                    results["data"].get("product"),
-                    results["data"].get("mrp"),
-                    results["data"].get("net_quantity"),
-                    results["data"].get("manufacturer"),
-                    results["data"].get("country"),
-                    results["data"].get("care"),
-                    results.get("compliant"),
-                    results["data"].get("issue"),
-                    product_id,
-                    (text[:200] if text else None)
-                ])
-        except Exception as e:
-            print("CSV log write error:", e)
-
-        # Write full extracted text to a dedicated CSV log
-        try:
-            extracted_csv_path = os.path.join("data", "extracted_texts.csv")
-            os.makedirs("data", exist_ok=True)
-            file_exists_et = os.path.exists(extracted_csv_path)
-            import csv as _csv
-            with open(extracted_csv_path, mode="a", newline="", encoding="utf-8") as f:
-                writer = _csv.writer(f)
-                if not file_exists_et:
-                    writer.writerow(["timestamp", "filename", "processed_file", "product_id", "full_text"]) 
-                writer.writerow([
-                    datetime.now().isoformat(),
-                    results.get("filename"),
-                    results.get("processed_file"),
-                    product_id,
-                    text
-                ])
-        except Exception as e:
-            print("Extracted text CSV write error:", e)
-
-    # --- CASE 3: ESP32 snapshot URL provided ---
-    elif snapshot_url:
+    # Handle ESP32 snapshot
+    if snapshot_url:
         try:
             headers = {"User-Agent": "Mozilla/5.0"}
             resp = requests.get(snapshot_url, headers=headers, timeout=10)
             resp.raise_for_status()
-            # Determine extension from content-type if possible
             ext = ".jpg"
             ctype = resp.headers.get("Content-Type", "")
             if "png" in ctype:
@@ -680,80 +548,23 @@ def check_product():
             filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             with open(filepath, "wb") as f:
                 f.write(resp.content)
-            results["filename"] = to_url_path(filepath)
-
-            # OCR using helper module
-            try:
-                pil_img = open_image_or_error(filepath)
-                text, processed_image_for_save = perform_ocr(pil_img)
-            except Exception as _ocr2_e:
-                results["compliant"] = False
-                results["data"] = {"issue": f"OCR failed: {_ocr2_e}"}
-                text = ""
-                processed_image_for_save = pil_img if 'pil_img' in locals() else Image.open(filepath)
-
-            extracted_data = {
-                "product": "ESP32 Snapshot",
-                "mrp": "₹" + text.split("MRP")[-1].split("\n")[0].strip() if "MRP" in text else "Not Found",
-                "net_quantity": "500g" if "500g" in text else "Not Found",
-                "manufacturer": "ABC Foods" if "ABC" in text else "Not Found",
-                "country": "India" if "India" in text else "Not Found",
-                "care": "care@abc.com" if "@" in text else "Not Found"
+            fields = extract_text_fields(filepath)
+            results["filename"] = url_for('static', filename=filepath.replace('static/', ''))
+            results["processed_file"] = url_for('static', filename=fields['processed_file'].replace('static/', ''))
+            results["data"] = {
+                "product": fields['product'],
+                "mrp": fields['mrp'],
+                "expiry": fields['expiry'],
+                "country": fields['origin']
             }
-
-            # Lightweight name keyword match
-            matched_product = None
-            for product in all_products:
-                if any(keyword in text.lower() for keyword in (product.get('name', '') or '').lower().split()[:3]):
-                    matched_product = product
-                    break
-            if matched_product:
-                extracted_data.update({
-                    "product": matched_product.get('name', 'ESP32 Snapshot'),
-                    "mrp": matched_product.get('price', 'Not Found'),
-                    "matched_from_csv": True
-                })
-
-            results["data"] = extracted_data
-            # Evaluate rule engine for ESP32 URL flow
-            compliant, issues = evaluate_legal_metrology_rules(results["data"])
-            results["compliant"] = compliant
-            if not compliant:
-                results["data"]["issue"] = "; ".join(issues)
-
-            processed_path = os.path.join(PROCESSED_FOLDER, "processed_" + filename)
-            try:
-                processed_image_for_save.save(processed_path)
-            except Exception:
-                Image.open(filepath).save(processed_path)
-            results["processed_file"] = to_url_path(processed_path)
-
-            run_query('''INSERT INTO products
-                (title, brand, seller, category, scanned_at, source_url,
-                 mrp, net_qty, manufacturer, country_of_origin, consumer_care, raw_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (results["data"]["product"], None, None, None, datetime.now().isoformat(),
-                 snapshot_url, results["data"]["mrp"], results["data"]["net_quantity"],
-                 results["data"]["manufacturer"], results["data"]["country"],
-                 results["data"]["care"], text))
-
-            product_id = run_query("SELECT last_insert_rowid()", fetch=True)[0][0]
-            results["product_id"] = product_id
-
-            if not results["compliant"]:
-                run_query('''INSERT INTO violations (product_id, issue, severity, detected_at)
-                             VALUES (?, ?, ?, ?)''',
-                          (product_id, results["data"].get("issue", "Unknown"), "High", datetime.now().isoformat()))
         except Exception as e:
             results["data"] = {"error": f"Failed to fetch from ESP32: {e}"}
-            results["compliant"] = False
-
-    last_snapshot_rel = session.get("last_snapshot_rel")
-    last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
-    return render_template("product_monitoring.html", results=results,
-                           esp32_stream_url=ESP32_STREAM_URL,
-                           esp32_snapshot_url=ESP32_SNAPSHOT_URL,
-                           last_snapshot_url=last_snapshot_url)
+        last_snapshot_rel = session.get("last_snapshot_rel")
+        last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
+        return render_template("product_monitoring.html", results=results,
+                               esp32_stream_url=ESP32_STREAM_URL,
+                               esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                               last_snapshot_url=last_snapshot_url)
 
 # -----------------------------
 # Minimal snapshot capture + CSV log API

@@ -145,11 +145,7 @@
 
 <!-- Content -->
 <div class="content">
-  <div class="cards">
-    <div class="card"><h2 id="totalRules">152</h2><p>Total Rules</p></div>
-    <div class="card"><h2 id="activeRules">120</h2><p>Active Rules</p></div>
-    <div class="card"><h2 id="inactiveRules">32</h2><p>Inactive Rules</p></div>
-  </div>
+  <!-- Cards for total, active, and inactive rules removed. Dropdowns and rules table remain. -->
 
 
   <div class="table-container">
@@ -266,7 +262,11 @@ document.addEventListener('DOMContentLoaded', function() {
       // Insert selectors above the table
       const contentDiv = document.querySelector('.content');
       const cardsDiv = contentDiv.querySelector('.cards');
-      cardsDiv.insertAdjacentElement('afterend', selectorDiv);
+      if (cardsDiv) {
+        cardsDiv.insertAdjacentElement('afterend', selectorDiv);
+      } else {
+        contentDiv.insertAdjacentElement('afterbegin', selectorDiv);
+      }
 
       // Populate products for selected category
       function updateProductOptions() {

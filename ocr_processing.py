@@ -3,6 +3,8 @@ from typing import Tuple, Optional
 
 from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
 import pytesseract
+import cv2
+import numpy as np
 
 
 # Ensure Tesseract path on Windows if available
@@ -24,14 +26,25 @@ def open_image_or_error(path: str) -> Image.Image:
 
 def preprocess_for_ocr(pil_img: Image.Image) -> Image.Image:
     """Lightweight preprocessing to improve OCR quality without OpenCV."""
-    pil_gray = pil_img.convert('L')
-    w, h = pil_gray.size
-    # Avoid zero-size
-    pil_gray = pil_gray.resize((max(1, w * 2), max(1, h * 2)))
-    pil_blur = pil_gray.filter(ImageFilter.GaussianBlur(radius=1))
-    pil_autocontrast = ImageOps.autocontrast(pil_blur)
-    pil_thresh = pil_autocontrast.point(lambda p: 255 if p > 160 else 0)
-    return pil_thresh
+    # Convert PIL image to OpenCV format
+    img = np.array(pil_img.convert('RGB'))
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    h, w = img.shape
+    # Upscale 3x for better OCR resolution
+    img = cv2.resize(img, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
+    # Bilateral filter for denoising while preserving edges
+    img = cv2.bilateralFilter(img, d=9, sigmaColor=75, sigmaSpace=75)
+    # CLAHE for local contrast enhancement
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    img = clahe.apply(img)
+    # Strong sharpening kernel
+    kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+    img = cv2.filter2D(img, -1, kernel)
+    # Adaptive thresholding
+    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 10)
+    # Convert back to PIL Image
+    pil_out = Image.fromarray(img)
+    return pil_out
 
 
 def perform_ocr(pil_img: Image.Image, fallback_to_original: bool = True) -> Tuple[str, Image.Image]:
