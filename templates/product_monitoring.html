@@ -1,3 +1,23 @@
+<script>
+  function clearResults() {
+    // Hide product info
+    const infoDiv = document.getElementById('selectedProductInfo');
+    if (infoDiv) {
+      infoDiv.style.display = 'none';
+      infoDiv.innerHTML = '';
+    }
+    // Hide results section
+    const resultsDiv = document.getElementById('results');
+    if (resultsDiv) {
+      resultsDiv.innerHTML = '';
+    }
+    // Optionally reset dropdowns
+    const dropdown = document.getElementById('productDropdown');
+    if (dropdown) {
+      dropdown.value = '';
+    }
+  }
+</script>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -303,11 +323,16 @@
       <h2>Choose Category & Time</h2>
       <form id="categoryTimeForm">
         <label for="category">Category:</label>
-        <select id="category" name="category" onchange="loadCategoryProducts()">
+        <select id="category" name="category" onchange="updateProductDropdown()">
           <option value="">All Categories</option>
           <option value="protein">Protein</option>
           <option value="mobile">Mobile</option>
           <option value="laptop">Laptop</option>
+        </select>
+
+        <label for="productDropdown">Product:</label>
+        <select id="productDropdown" name="productDropdown" onchange="showSelectedProductInfo()">
+          <option value="">Select a product</option>
         </select>
 
         <label for="time">Time Filter:</label>
@@ -318,7 +343,25 @@
           <option value="3_months">3 Months Ago</option>
         </select>
 
-        <button type="button" onclick="loadCategoryProducts()">Check Compliance</button>
+  <button type="button" onclick="loadCategoryProducts()">Check Compliance</button>
+<script>
+async function updateProductDropdown() {
+  const category = document.getElementById('category').value;
+  const dropdown = document.getElementById('productDropdown');
+  dropdown.innerHTML = '<option value="">Loading...</option>';
+  try {
+    const resp = await fetch(`/get_products?category=${category}`);
+    const products = await resp.json();
+    dropdown.innerHTML = '<option value="">Select a product</option>';
+    for (const p of products) {
+      dropdown.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+    }
+  } catch (e) {
+    dropdown.innerHTML = '<option value="">Error loading products</option>';
+  }
+}
+window.addEventListener('DOMContentLoaded', updateProductDropdown);
+</script>
       </form>
     </div>
 
@@ -368,11 +411,11 @@
 
   <!-- Results Section -->
   <div id="results">
-    <div id="sampleResults"></div>
     {% if results %}
     <div class="result-card">
-      <h3>Processing Result</h3>
-      {% if results.data %}
+    <h3>Processing Result</h3>
+    {% if results.data %}
+  <p><strong>Product Name:</strong> {{ results.data.product or 'Not Found' }}</p>
   <p><strong>Manufacturer / Packer / Importer:</strong> {{ results.data.manufacturer or 'Not Found' }}</p>
   <p><strong>Address:</strong> {{ results.data.address or 'Not Found' }}</p>
   <p><strong>Commodity Name:</strong> {{ results.data.commodity or 'Not Found' }}</p>
@@ -384,37 +427,89 @@
         {% if results.data.issue %}
           <p><strong>issue:</strong> {{ results.data.issue }}</p>
       {% endif %}
+      {% if results.data.raw_text %}
+        <div style="margin-top:18px; background:#f4f6f9; border-radius:8px; padding:12px;">
+          <strong>Raw OCR Text:</strong>
+          <pre style="white-space:pre-wrap; font-size:13px; color:#444; background:#fafafa; border-radius:6px; padding:8px; margin-top:6px;">{{ results.data.raw_text }}</pre>
+        </div>
       {% endif %}
-      {% if results.compare %}
-        <h4 style="margin-top:12px;">CSV Matches (≥ {{ results.compare.threshold }}%)</h4>
-        {% if results.compare.has_match %}
-          <div style="overflow:auto;">
-            <table style="width:100%; border-collapse:collapse;">
-              <thead>
-                <tr>
-                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Name</th>
-                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Price</th>
-                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Score %</th>
-                  <th style="text-align:left; border-bottom:1px solid #eee; padding:8px;">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for m in results.compare.top_matches %}
-                <tr>
-                  <td style="padding:8px;">{{ m.name }}</td>
-                  <td style="padding:8px;">{{ m.price }}</td>
-                  <td style="padding:8px;">{{ m.score_percent }}</td>
-                  <td style="padding:8px;">{{ m.details[:120] }}{% if m.details and m.details|length > 120 %}...{% endif %}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <p>No CSV products matched at the chosen threshold.</p>
-        {% endif %}
       {% endif %}
-
+      {% if results.filename or results.processed_file %}
+        <div style="display:flex; gap:10px; align-items:flex-start; margin-top:12px;">
+          {% if results.filename %}
+            <div style="flex:0 0 auto; width:32%;">
+              <img data-preview src="{{ results.filename.lstrip('/') }}" alt="Captured" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Captured</div>
+            </div>
+          {% endif %}
+          {% if results.processed_file %}
+            <div style="flex:0 0 auto; width:32%;">
+              <img data-preview src="{{ results.processed_file.lstrip('/') }}" alt="Processed" style="width:100%; max-height:180px; object-fit:contain; border-radius:8px; cursor: zoom-in;" />
+              <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Processed</div>
+            </div>
+          {% else %}
+            <div style="flex:0 0 auto; width:32%; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <div style="width:100%; height:180px; background:#eee; border-radius:8px; display:flex; align-items:center; justify-content:center; color:#888; font-size:16px;">No processed image available</div>
+              <div style="font-size:12px; color:#555; text-align:center; margin-top:6px;">Processed</div>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+      {% if results.data and results.data.error %}
+        <div class="violation-item" style="margin-top:12px; background:#f8d7da; border-color:#f5c6cb;">
+          <strong>Capture Error:</strong> {{ results.data.error }}
+        </div>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div style="text-align:center; margin:24px 0;">
+      <button id="clearResultsBtn" style="background:#DB5A5A; color:white; padding:10px 24px; border:none; border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer;" onclick="clearResults()">Clear</button>
+    </div>
+  </div>
+    <script>
+      function clearResults() {
+        // Hide product info
+        const infoDiv = document.getElementById('selectedProductInfo');
+        if (infoDiv) {
+          infoDiv.style.display = 'none';
+          infoDiv.innerHTML = '';
+        }
+        // Hide results section
+        const resultsDiv = document.getElementById('results');
+        if (resultsDiv) {
+          resultsDiv.innerHTML = '';
+        }
+        // Optionally reset dropdowns
+        const dropdown = document.getElementById('productDropdown');
+        if (dropdown) {
+          dropdown.value = '';
+        }
+      }
+    </script>
+  <div id="results">
+    {% if results %}
+    <div class="result-card">
+    <h3>Processing Result</h3>
+    {% if results.data %}
+  <p><strong>Product Name:</strong> {{ results.data.product or 'Not Found' }}</p>
+  <p><strong>Manufacturer / Packer / Importer:</strong> {{ results.data.manufacturer or 'Not Found' }}</p>
+  <p><strong>Address:</strong> {{ results.data.address or 'Not Found' }}</p>
+  <p><strong>Commodity Name:</strong> {{ results.data.commodity or 'Not Found' }}</p>
+  <p><strong>Net Quantity:</strong> {{ results.data.net_quantity or 'Not Found' }}</p>
+  <p><strong>MRP (₹):</strong> {{ results.data.mrp or 'Not Found' }}</p>
+  <p><strong>Date of Manufacture / Import:</strong> {{ results.data.date or 'Not Found' }}</p>
+  <p><strong>Consumer Care Details:</strong> {{ results.data.consumer_care or 'Not Found' }}</p>
+  <p><strong>Country of Origin:</strong> {{ results.data.origin or 'Not Found' }}</p>
+        {% if results.data.issue %}
+          <p><strong>issue:</strong> {{ results.data.issue }}</p>
+      {% endif %}
+      {% if results.data.raw_text %}
+        <div style="margin-top:18px; background:#f4f6f9; border-radius:8px; padding:12px;">
+          <strong>Raw OCR Text:</strong>
+          <pre style="white-space:pre-wrap; font-size:13px; color:#444; background:#fafafa; border-radius:6px; padding:8px; margin-top:6px;">{{ results.data.raw_text }}</pre>
+        </div>
+      {% endif %}
+      {% endif %}
       {% if results.filename or results.processed_file %}
         <div style="display:flex; gap:10px; align-items:flex-start; margin-top:12px;">
           {% if results.filename %}
@@ -444,6 +539,59 @@
     </div>
     {% endif %}
   </div>
+  <!-- Product Info Display Section -->
+  <div id="selectedProductInfo" style="margin:32px auto 0 auto; max-width:600px; display:none; border-radius:12px; background:#f4f6f9; padding:28px; box-shadow:0 4px 16px rgba(0,0,0,0.09);">
+    <!-- Product info will be injected here -->
+  </div>
+  <script>
+    async function showSelectedProductInfo() {
+      const category = document.getElementById('category').value;
+      const dropdown = document.getElementById('productDropdown');
+      const productId = dropdown.value;
+      const infoDiv = document.getElementById('selectedProductInfo');
+      if (!productId) {
+        infoDiv.style.display = 'none';
+        infoDiv.innerHTML = '';
+        return;
+      }
+      // Fetch product details from backend
+      try {
+        const resp = await fetch(`/get_products?category=${category}`);
+        const products = await resp.json();
+        const product = products.find(p => String(p.id) === String(productId));
+        if (!product) {
+          infoDiv.style.display = 'none';
+          infoDiv.innerHTML = '';
+          return;
+        }
+        // Try to get more details from CSVs (if available)
+        let details = '';
+        let imgSrc = '';
+        // Try to fetch CSV row for details
+        let csvResp = await fetch(`/get_product_details?category=${category}&id=${productId}`);
+        let csvData = await csvResp.json();
+        if (csvData && csvData.details) {
+          details = csvData.details;
+          imgSrc = csvData.image || '';
+        }
+        infoDiv.innerHTML = `
+          <div style="display:flex; gap:32px; align-items:flex-start;">
+            <div style="flex:0 0 200px;">
+              <img src="${imgSrc || '/static/logo.png'}" alt="Product Image" style="width:200px; height:200px; object-fit:contain; border-radius:12px; background:#eee; box-shadow:0 2px 8px rgba(0,0,0,0.07);" />
+            </div>
+            <div style="flex:1;">
+              <h2 style="margin:0 0 12px 0; color:#2F3C7E; font-size:1.5em;">${product.name}</h2>
+              <div style="font-size:17px; color:#444; line-height:1.5;">${details || 'No details available.'}</div>
+            </div>
+          </div>
+        `;
+        infoDiv.style.display = 'block';
+      } catch (e) {
+        infoDiv.innerHTML = '<div style="color:#DB5A5A;">Error loading product info.</div>';
+        infoDiv.style.display = 'block';
+      }
+    }
+  </script>
   <script id="serverResultsData" type="application/json">{{ results|tojson if results else 'null' }}</script>
 
   <!-- Loading Overlay -->

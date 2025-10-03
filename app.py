@@ -18,6 +18,33 @@ from PIL import Image, ImageOps, ImageFilter
 import numpy as np
 from ocr_processing import preprocess_for_ocr
 import re
+from field_extraction import extract_product_fields
+
+# ...existing code...
+# Flask app setup and CSV loading
+# ...existing code...
+# Place this after app = Flask(__name__) and after CSVs are loaded
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, jsonify
+import requests, os, sqlite3
+from bs4 import BeautifulSoup
+from werkzeug.utils import secure_filename
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+from PIL import ImageFile
+from PIL import UnidentifiedImageError
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import Table, TableStyle
+from reportlab.lib import colors
+from io import BytesIO
+import difflib
+import cv2
+import pytesseract
+from PIL import Image, ImageOps, ImageFilter
+import numpy as np
+from ocr_processing import preprocess_for_ocr
+import re
+from field_extraction import extract_product_fields
 
 
 """Flask app for product monitoring and compliance checks."""
@@ -92,8 +119,69 @@ laptop_products = load_products_csv("data/laptop.csv")
 mobile_products = load_products_csv("data/mobile.csv")
 protein_products = load_products_csv("data/protein.csv")
 
+
 # Combine all products for general use
 all_products = laptop_products + mobile_products + protein_products
+
+# -----------------------------
+# API: Get products by category for dropdown
+@app.route('/get_product_details', methods=['GET'])
+def get_product_details():
+    category = request.args.get('category', '').lower()
+    idx = request.args.get('id', None)
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid product id'}), 400
+    if category == 'mobile':
+        products = mobile_products
+    elif category == 'laptop':
+        products = laptop_products 
+    elif category == 'protein':
+        products = protein_products
+    else:
+        products = all_products
+    if idx < 0 or idx >= len(products):
+        return jsonify({'error': 'Product not found'}), 404
+    product = products[idx]
+    # Try to extract details and image
+    details = ''
+    img_src = ''
+    # Compose details from available fields
+    if category == 'mobile':
+        details = product.get('details') or product.get('name') or ''
+        img_src = product.get('image_url') or ''
+    elif category == 'laptop':
+        details = product.get('details') or product.get('name') or ''
+        img_src = product.get('image_url') or ''
+    elif category == 'protein':
+        details = product.get('Details') or product.get('Product Name') or ''
+        img_src = product.get('Image') or ''
+    else:
+        details = product.get('details') or product.get('name') or product.get('Product Name') or ''
+        img_src = product.get('image') or product.get('Image') or ''
+    # If image path is relative, prepend static folder
+    if img_src and not img_src.startswith('http'):
+        img_src = '/static/uploads/' + img_src if os.path.exists(os.path.join('static/uploads', img_src)) else '/static/logo.png'
+    return jsonify({'details': details, 'image': img_src})
+# -----------------------------
+@app.route('/get_products', methods=['GET'])
+def get_products():
+    category = request.args.get('category', '').lower()
+    if category == 'mobile':
+        products = mobile_products
+    elif category == 'laptop':
+        products = laptop_products
+    elif category == 'protein':
+        products = protein_products
+    else:
+        products = all_products
+    # Return only name and id (or index) for dropdown
+    result = []
+    for idx, p in enumerate(products):
+        name = p.get('name') or p.get('Product Name') or p.get('product') or f"Product {idx+1}"
+        result.append({'id': idx, 'name': name})
+    return jsonify(result)
 
 # -----------------------------
 # Helper to create dummy placeholder images
@@ -470,32 +558,9 @@ def check_product():
         img = cv2.imread(processed_path)
         text = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
         print(f"[DEBUG] OCR text: {text}")
-        # Manufacturer/Importer/Packer Name & Address
-        manufacturer = re.search(r'(?:Manufacturer|Packer|Importer)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
-        address = re.search(r'(?:Address|Addr)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
-        # Commodity Name
-        commodity = re.search(r'(?:Commodity|Product|Item|Generic Name)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
-        # Net Quantity
-        net_qty = re.search(r'(?:Net Quantity|Net Qty|Quantity)[^\n]*[:\- ]*([\d.,]+\s*(kg|g|l|ml|pcs|piece|tablet|capsule|pack|number)?)', text, re.IGNORECASE)
-        # MRP
-        mrp = re.search(r'(?:MRP|Price|Retail Sale Price)[^\n]*[:\- ₹Rs]*([\d,.]+)', text, re.IGNORECASE)
-        # Date of Manufacture/Import
-        date = re.search(r'(?:Date of (?:Manufacture|Import)|Mfg Date|Packed on|Best before|Use by)[^\n]*[:\- ]*([\d]{2}[\/\-][\d]{2}[\/\-][\d]{4})', text, re.IGNORECASE)
-        # Consumer Care Details
-        consumer_care = re.search(r'(?:Consumer Care|Customer Care|Contact)[^\n]*[:\- ]*([^\n]+)', text, re.IGNORECASE)
-        # Country of Origin
-        origin = re.search(r'(?:Country of Origin|Origin)[^\n]*[:\- ]*([A-Za-z ]+)', text, re.IGNORECASE)
-        return {
-            'manufacturer': manufacturer.group(1).strip() if manufacturer else 'Not Found',
-            'address': address.group(1).strip() if address else 'Not Found',
-            'commodity': commodity.group(1).strip() if commodity else 'Not Found',
-            'net_quantity': net_qty.group(1).strip() if net_qty else 'Not Found',
-            'mrp': mrp.group(1).strip() if mrp else 'Not Found',
-            'date': date.group(1).strip() if date else 'Not Found',
-            'consumer_care': consumer_care.group(1).strip() if consumer_care else 'Not Found',
-            'origin': origin.group(1).strip() if origin else 'Not Found',
-            'processed_file': processed_path
-        }
+        # Robust regex patterns and line-based search
+        # Use modular extraction from field_extraction.py
+        return extract_product_fields(text, processed_path)
 
     # Handle file upload
     if image and getattr(image, 'filename', ''):
@@ -518,7 +583,9 @@ def check_product():
             "mrp": fields.get('mrp', 'Not Found'),
             "date": fields.get('date', 'Not Found'),
             "consumer_care": fields.get('consumer_care', 'Not Found'),
-            "origin": fields.get('origin', 'Not Found')
+            "origin": fields.get('origin', 'Not Found'),
+            "product": fields.get('product', 'Not Found'),
+            "raw_text": fields.get('raw_text', '')
         }
         print(f"[DEBUG] Results: {results}")
         if results["filename"]:
