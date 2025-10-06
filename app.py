@@ -67,6 +67,7 @@ if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = t_path
     # Also add to PATH
     os.environ['PATH'] += r";C:\Program Files\Tesseract-OCR"
+    os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR\tessdata"
 app.secret_key = "your_secret_key"   # Required for sessions
 
 # Serve rules.json for frontend fetch

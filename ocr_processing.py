@@ -10,6 +10,7 @@ import numpy as np
 # Ensure Tesseract path on Windows
 if os.name == 'nt':
     pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+    os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR\tessdata"
 
 
 def open_image_or_error(path: str) -> Image.Image:
