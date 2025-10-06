@@ -601,58 +601,62 @@ def check_product():
 
     # Handle file upload
     if image and getattr(image, 'filename', ''):
-        filename = secure_filename(image.filename)
-        filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-        image.save(filepath)
-        print(f"[DEBUG] Uploaded image saved: {filepath}")
-        fields = extract_text_fields(filepath)
-        # Normalize processed image path for url_for
-        def to_web_path(p):
-            return p.replace('\\', '/').replace('\\', '/').replace('\\', '/') if p else p
-        processed_rel = to_web_path(os.path.relpath(fields['processed_file'], 'static')) if fields['processed_file'] else ''
-        results["filename"] = url_for('static', filename=to_web_path(os.path.relpath(filepath, 'static')))
-        results["processed_file"] = url_for('static', filename=processed_rel) if processed_rel else None
-        results["data"] = {
-            "manufacturer": fields.get('manufacturer', 'Not Found'),
-            "address": fields.get('address', 'Not Found'),
-            "commodity": fields.get('commodity', 'Not Found'),
-            "net_quantity": fields.get('net_quantity', 'Not Found'),
-            "mrp": fields.get('mrp', 'Not Found'),
-            "date": fields.get('date', 'Not Found'),
-            "consumer_care": fields.get('consumer_care', 'Not Found'),
-            "origin": fields.get('origin', 'Not Found'),
-            "product": fields.get('product', 'Not Found'),
-            "raw_text": fields.get('raw_text', '')
-        }
-        # Calculate compliance score and store in results
-        compliance_fields = [
-            results["data"].get('product', None),
-            results["data"].get('manufacturer', None),
-            results["data"].get('address', None),
-            results["data"].get('commodity', None),
-            results["data"].get('net_quantity', None),
-            results["data"].get('mrp', None),
-            results["data"].get('date', None),
-            results["data"].get('consumer_care', None),
-            results["data"].get('origin', None)
-        ]
-        present_count = sum(1 for info in compliance_fields if info and info != 'Not Found')
-        total_fields = len(compliance_fields)
-        compliance_score = int((present_count / total_fields) * 100) if total_fields else 0
-        results["compliance_score"] = compliance_score
-        # Store results in session for PDF
-        session['latest_results'] = results
-        print(f"[DEBUG] Results: {results}")
-        if results["filename"]:
-            print(f"[DEBUG] Template Captured image URL: {results['filename']}")
-        if results["processed_file"]:
-            print(f"[DEBUG] Template Processed image URL: {results['processed_file']}")
+        try:
+            filename = secure_filename(image.filename)
+            filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+            image.save(filepath)
+            print(f"[DEBUG] Uploaded image saved: {filepath}")
+            fields = extract_text_fields(filepath)
+            # Normalize processed image path for url_for
+            def to_web_path(p):
+                return p.replace('\\', '/').replace('\\', '/').replace('\\', '/') if p else p
+            processed_rel = to_web_path(os.path.relpath(fields['processed_file'], 'static')) if fields['processed_file'] else ''
+            results["filename"] = url_for('static', filename=to_web_path(os.path.relpath(filepath, 'static')))
+            results["processed_file"] = url_for('static', filename=processed_rel) if processed_rel else None
+            results["data"] = {
+                "manufacturer": fields.get('manufacturer', 'Not Found'),
+                "address": fields.get('address', 'Not Found'),
+                "commodity": fields.get('commodity', 'Not Found'),
+                "net_quantity": fields.get('net_quantity', 'Not Found'),
+                "mrp": fields.get('mrp', 'Not Found'),
+                "date": fields.get('date', 'Not Found'),
+                "consumer_care": fields.get('consumer_care', 'Not Found'),
+                "origin": fields.get('origin', 'Not Found'),
+                "product": fields.get('product', 'Not Found'),
+                "raw_text": fields.get('raw_text', '')
+            }
+            # Calculate compliance score and store in results
+            compliance_fields = [
+                results["data"].get('product', None),
+                results["data"].get('manufacturer', None),
+                results["data"].get('address', None),
+                results["data"].get('commodity', None),
+                results["data"].get('net_quantity', None),
+                results["data"].get('mrp', None),
+                results["data"].get('date', None),
+                results["data"].get('consumer_care', None),
+                results["data"].get('origin', None)
+            ]
+            present_count = sum(1 for info in compliance_fields if info and info != 'Not Found')
+            total_fields = len(compliance_fields)
+            compliance_score = int((present_count / total_fields) * 100) if total_fields else 0
+            results["compliance_score"] = compliance_score
+            # Store results in session for PDF
+            session['latest_results'] = results
+            print(f"[DEBUG] Results: {results}")
+            if results["filename"]:
+                print(f"[DEBUG] Template Captured image URL: {results['filename']}")
+            if results["processed_file"]:
+                print(f"[DEBUG] Template Processed image URL: {results['processed_file']}")
+        except Exception as e:
+            results["data"] = {"error": f"Failed to process uploaded image: {e}"}
+            results["compliance_score"] = 0
         last_snapshot_rel = session.get("last_snapshot_rel")
         last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
         return render_template("product_monitoring.html", results=results,
-                               esp32_stream_url=ESP32_STREAM_URL,
-                               esp32_snapshot_url=ESP32_SNAPSHOT_URL,
-                               last_snapshot_url=last_snapshot_url)
+                              esp32_stream_url=ESP32_STREAM_URL,
+                              esp32_snapshot_url=ESP32_SNAPSHOT_URL,
+                              last_snapshot_url=last_snapshot_url)
 
     # Handle ESP32 snapshot
     if snapshot_url:
