@@ -65,6 +65,8 @@ app = Flask(__name__)
 if os.name == 'nt':
     t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
     pytesseract.pytesseract.tesseract_cmd = t_path
+    # Also add to PATH
+    os.environ['PATH'] += r";C:\Program Files\Tesseract-OCR"
 app.secret_key = "your_secret_key"   # Required for sessions
 
 # Serve rules.json for frontend fetch

@@ -7,14 +7,9 @@ import cv2
 import numpy as np
 
 
-# Ensure Tesseract path on Windows if available
-try:
-    if os.name == 'nt':
-        t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-        if os.path.exists(t_path):
-            pytesseract.pytesseract.tesseract_cmd = t_path
-except Exception:
-    pass
+# Ensure Tesseract path on Windows
+if os.name == 'nt':
+    pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
 
 def open_image_or_error(path: str) -> Image.Image:
@@ -52,14 +47,20 @@ def perform_ocr(pil_img: Image.Image, fallback_to_original: bool = True) -> Tupl
 
     Returns (text, processed_image_used)
     """
+    print(f"[DEBUG] Tesseract cmd: {pytesseract.pytesseract.tesseract_cmd}")
     try:
         processed = preprocess_for_ocr(pil_img)
         text = pytesseract.image_to_string(processed, config='--oem 3 --psm 6')
         return text, processed
-    except Exception:
+    except Exception as e:
+        print(f"[DEBUG] OCR failed on processed: {e}")
         if fallback_to_original:
-            text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
-            return text, pil_img
+            try:
+                text = pytesseract.image_to_string(pil_img, config='--oem 3 --psm 6')
+                return text, pil_img
+            except Exception as e2:
+                print(f"[DEBUG] OCR failed on original: {e2}")
+                raise e2
         raise
 
 
