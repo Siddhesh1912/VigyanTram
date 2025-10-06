@@ -64,8 +64,7 @@ from field_extraction import extract_product_fields
 app = Flask(__name__)
 if os.name == 'nt':
     t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-    if os.path.exists(t_path):
-        pytesseract.pytesseract.tesseract_cmd = t_path
+    pytesseract.pytesseract.tesseract_cmd = t_path
 app.secret_key = "your_secret_key"   # Required for sessions
 
 # Serve rules.json for frontend fetch
