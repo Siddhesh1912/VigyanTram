@@ -429,25 +429,75 @@ window.addEventListener('DOMContentLoaded', updateProductDropdown);
     <div class="result-card">
     <h3>Processing Result</h3>
     {% if results.data %}
-  <p><strong>Product Name:</strong> {{ results.data.product or 'Not Found' }}</p>
-  <p><strong>Manufacturer / Packer / Importer:</strong> {{ results.data.manufacturer or 'Not Found' }}</p>
-  <p><strong>Address:</strong> {{ results.data.address or 'Not Found' }}</p>
-  <p><strong>Commodity Name:</strong> {{ results.data.commodity or 'Not Found' }}</p>
-  <p><strong>Net Quantity:</strong> {{ results.data.net_quantity or 'Not Found' }}</p>
-  <p><strong>MRP (₹):</strong> {{ results.data.mrp or 'Not Found' }}</p>
-  <p><strong>Date of Manufacture / Import:</strong> {{ results.data.date or 'Not Found' }}</p>
-  <p><strong>Consumer Care Details:</strong> {{ results.data.consumer_care or 'Not Found' }}</p>
-  <p><strong>Country of Origin:</strong> {{ results.data.origin or 'Not Found' }}</p>
-        {% if results.data.issue %}
-          <p><strong>issue:</strong> {{ results.data.issue }}</p>
-      {% endif %}
-      {% if results.data.raw_text %}
-        <div style="margin-top:18px; background:#f4f6f9; border-radius:8px; padding:12px;">
-          <strong>Raw OCR Text:</strong>
-          <pre style="white-space:pre-wrap; font-size:13px; color:#444; background:#fafafa; border-radius:6px; padding:8px; margin-top:6px;">{{ results.data.raw_text }}</pre>
-        </div>
-      {% endif %}
-      {% endif %}
+    {% if results.compliance_score is defined %}
+      {% set compliance_score = results.compliance_score %}
+    {% else %}
+      {% set present_count = 0 %}
+      {% set total_fields = 9 %}
+      {% set fields = [
+        ('Product Name', results.data.product),
+        ('Manufacturer / Packer / Importer', results.data.manufacturer),
+        ('Address', results.data.address),
+        ('Commodity Name', results.data.commodity),
+        ('Net Quantity', results.data.net_quantity),
+        ('MRP (₹)', results.data.mrp),
+        ('Date of Manufacture / Import', results.data.date),
+        ('Consumer Care Details', results.data.consumer_care),
+        ('Country of Origin', results.data.origin)
+      ] %}
+      {% for label, value in fields %}
+        {% if value and value != 'Not Found' %}
+          {% set present_count = present_count + 1 %}
+        {% endif %}
+      {% endfor %}
+      {% set compliance_score = (present_count / total_fields * 100) | round(0, 'floor') %}
+    {% endif %}
+    <div style="font-size:18px; font-weight:bold; color:#2F3C7E; margin-bottom:12px;">Compliance Score: {{ compliance_score }}%</div>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:18px;">
+      <thead>
+        <tr style="background:#f4f6f9;">
+          <th style="padding:8px; border-bottom:1px solid #eee; text-align:left;">Field</th>
+          <th style="padding:8px; border-bottom:1px solid #eee; text-align:left;">Status</th>
+          <th style="padding:8px; border-bottom:1px solid #eee; text-align:left;">Info</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set fields = [
+          ('Product Name', results.data.product),
+          ('Manufacturer / Packer / Importer', results.data.manufacturer),
+          ('Address', results.data.address),
+          ('Commodity Name', results.data.commodity),
+          ('Net Quantity', results.data.net_quantity),
+          ('MRP (₹)', results.data.mrp),
+          ('Date of Manufacture / Import', results.data.date),
+          ('Consumer Care Details', results.data.consumer_care),
+          ('Country of Origin', results.data.origin)
+        ] %}
+        {% for label, value in fields %}
+        <tr>
+          <td style="padding:8px; border-bottom:1px solid #eee;">{{ label }}</td>
+          <td style="padding:8px; border-bottom:1px solid #eee;">
+            {% if value and value != 'Not Found' %}
+              <span style="color:green; font-size:18px; font-weight:bold;">&#10004; Present</span>
+            {% else %}
+              <span style="color:red; font-size:18px; font-weight:bold;">&#10008; Absent</span>
+            {% endif %}
+          </td>
+          <td style="padding:8px; border-bottom:1px solid #eee;">{{ value or 'Not Found' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if results.data.issue %}
+      <p><strong>issue:</strong> {{ results.data.issue }}</p>
+    {% endif %}
+    {% if results.data.raw_text %}
+      <div style="margin-top:18px; background:#f4f6f9; border-radius:8px; padding:12px;">
+        <strong>Raw OCR Text:</strong>
+        <pre style="white-space:pre-wrap; font-size:13px; color:#444; background:#fafafa; border-radius:6px; padding:8px; margin-top:6px;">{{ results.data.raw_text }}</pre>
+      </div>
+    {% endif %}
+    {% endif %}
       {% if results.filename or results.processed_file %}
         <div style="display:flex; gap:10px; align-items:flex-start; margin-top:12px;">
           {% if results.filename %}

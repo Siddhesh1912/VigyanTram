@@ -1,3 +1,12 @@
+# -----------------------------
+# API: Get all compliance checks (all products)
+
+from flask import Flask, render_template, request, redirect, url_for, send_file, session, jsonify
+import requests, os, sqlite3
+from bs4 import BeautifulSoup
+from werkzeug.utils import secure_filename
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
 from flask import Flask, render_template, request, redirect, url_for, send_file, session, jsonify
 import requests, os, sqlite3
 from bs4 import BeautifulSoup
@@ -379,6 +388,34 @@ def home():
 def violation_reports():
     return render_template("violation_reports.html")
 
+@app.route('/get_compliance_checks')
+@login_required
+def get_compliance_checks():
+    query = '''
+    SELECT p.title as product, p.seller, p.mrp, p.net_qty, p.scanned_at as detected_at, p.category,
+           'Non-Compliant' as status, v.issue, v.severity
+    FROM violations v
+    JOIN products p ON v.product_id = p.id
+    ORDER BY v.detected_at DESC
+    '''
+    rows = run_query(query, fetch=True)
+    checks = []
+    for row in rows:
+        checks.append({
+            'product': row['product'] or 'Unknown',
+            'seller': row['seller'] or 'Unknown',
+            'mrp': row['mrp'] or '-',
+            'net_qty': row['net_qty'] or '-',
+            'detected_at': row['detected_at'] or '-',
+            'category': row['category'] or '-',
+            'status': row['status'],
+            'issue': row['issue'] or 'N/A',
+            'severity': row['severity'] or 'N/A'
+        })
+    return jsonify(checks)
+
+# -----------------------------
+
 @app.route("/categories")
 @login_required
 def categories():
@@ -587,6 +624,24 @@ def check_product():
             "product": fields.get('product', 'Not Found'),
             "raw_text": fields.get('raw_text', '')
         }
+        # Calculate compliance score and store in results
+        compliance_fields = [
+            results["data"].get('product', None),
+            results["data"].get('manufacturer', None),
+            results["data"].get('address', None),
+            results["data"].get('commodity', None),
+            results["data"].get('net_quantity', None),
+            results["data"].get('mrp', None),
+            results["data"].get('date', None),
+            results["data"].get('consumer_care', None),
+            results["data"].get('origin', None)
+        ]
+        present_count = sum(1 for info in compliance_fields if info and info != 'Not Found')
+        total_fields = len(compliance_fields)
+        compliance_score = int((present_count / total_fields) * 100) if total_fields else 0
+        results["compliance_score"] = compliance_score
+        # Store results in session for PDF
+        session['latest_results'] = results
         print(f"[DEBUG] Results: {results}")
         if results["filename"]:
             print(f"[DEBUG] Template Captured image URL: {results['filename']}")
@@ -619,13 +674,38 @@ def check_product():
             results["filename"] = url_for('static', filename=filepath.replace('static/', ''))
             results["processed_file"] = url_for('static', filename=fields['processed_file'].replace('static/', ''))
             results["data"] = {
-                "product": fields['product'],
-                "mrp": fields['mrp'],
-                "expiry": fields['expiry'],
-                "country": fields['origin']
+                "manufacturer": fields.get('manufacturer', 'Not Found'),
+                "address": fields.get('address', 'Not Found'),
+                "commodity": fields.get('commodity', 'Not Found'),
+                "net_quantity": fields.get('net_quantity', 'Not Found'),
+                "mrp": fields.get('mrp', 'Not Found'),
+                "date": fields.get('date', 'Not Found'),
+                "consumer_care": fields.get('consumer_care', 'Not Found'),
+                "origin": fields.get('origin', 'Not Found'),
+                "product": fields.get('product', 'Not Found'),
+                "raw_text": fields.get('raw_text', '')
             }
+            # Calculate compliance score and store in results
+            compliance_fields = [
+                results["data"].get('product', None),
+                results["data"].get('manufacturer', None),
+                results["data"].get('address', None),
+                results["data"].get('commodity', None),
+                results["data"].get('net_quantity', None),
+                results["data"].get('mrp', None),
+                results["data"].get('date', None),
+                results["data"].get('consumer_care', None),
+                results["data"].get('origin', None)
+            ]
+            present_count = sum(1 for info in compliance_fields if info and info != 'Not Found')
+            total_fields = len(compliance_fields)
+            compliance_score = int((present_count / total_fields) * 100) if total_fields else 0
+            results["compliance_score"] = compliance_score
+            # Store results in session for PDF
+            session['latest_results'] = results
         except Exception as e:
             results["data"] = {"error": f"Failed to fetch from ESP32: {e}"}
+            results["compliance_score"] = 0
         last_snapshot_rel = session.get("last_snapshot_rel")
         last_snapshot_url = url_for('static', filename=last_snapshot_rel) if last_snapshot_rel else None
         return render_template("product_monitoring.html", results=results,
@@ -872,6 +952,33 @@ def search_products():
 # -----------------------------
 @app.route("/download_report", methods=["POST"])
 def download_report():
+    # ...existing code...
+    # Get latest product results from session if available
+    try:
+        product_results = session.get('latest_results')
+        if not product_results:
+            product_results = {'data': {}}
+    except Exception:
+        product_results = {'data': {}}
+
+    # Prepare compliance info table
+    compliance_fields = [
+        ('Product Name', product_results['data'].get('product', None)),
+        ('Manufacturer / Packer / Importer', product_results['data'].get('manufacturer', None)),
+        ('Address', product_results['data'].get('address', None)),
+        ('Commodity Name', product_results['data'].get('commodity', None)),
+        ('Net Quantity', product_results['data'].get('net_quantity', None)),
+        ('MRP (₹)', product_results['data'].get('mrp', None)),
+        ('Date of Manufacture / Import', product_results['data'].get('date', None)),
+        ('Consumer Care Details', product_results['data'].get('consumer_care', None)),
+        ('Country of Origin', product_results['data'].get('origin', None))
+    ]
+
+    # Calculate compliance score
+    present_count = sum(1 for _, info in compliance_fields if info and info != 'Not Found')
+    total_fields = len(compliance_fields)
+    compliance_score = int((present_count / total_fields) * 100) if total_fields else 0
+
     from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import A4
     from reportlab.platypus import Table, TableStyle
@@ -880,90 +987,65 @@ def download_report():
     from datetime import datetime
 
     # Use actual uploaded files if they exist, otherwise use placeholder
-    uploaded_file = "static/uploads/img1.png"
-    processed_file = "static/processed/img2.png"
-    
-    # Check if files exist, if not create placeholder
-    if not os.path.exists(uploaded_file):
-        create_placeholder_image(uploaded_file, "Uploaded Image")
-    if not os.path.exists(processed_file):
-        create_placeholder_image(processed_file, "Processed Image")
+    uploaded_file = None
+    processed_file = None
+    if product_results:
+        # Extract file paths from session results
+        # Remove leading '/' if present for os.path.exists
+        uploaded_file_url = product_results.get('filename')
+        processed_file_url = product_results.get('processed_file')
+        if uploaded_file_url:
+            uploaded_file = uploaded_file_url.lstrip('/')
+            if not os.path.exists(uploaded_file):
+                uploaded_file = None
+        if processed_file_url:
+            processed_file = processed_file_url.lstrip('/')
+            if not os.path.exists(processed_file):
+                processed_file = None
+    # Fallback to sample images if not found
+    if not uploaded_file:
+        uploaded_file = "static/uploads/img1.png"
+        if not os.path.exists(uploaded_file):
+            create_placeholder_image(uploaded_file, "Uploaded Image")
+    if not processed_file:
+        processed_file = "static/processed/img2.png"
+        if not os.path.exists(processed_file):
+            create_placeholder_image(processed_file, "Processed Image")
 
-    # Generate OCR text from sample product data
-    sample_product = all_products[0] if all_products else {}
-    ocr_text = f"""Product Name: {sample_product.get('name', 'Sample Product')}
-Price: {sample_product.get('price', 'Not Available')}
-Details: {sample_product.get('details', 'No details available')}
-Image URL: {sample_product.get('image_url', 'No image')}"""
+    # Get latest product results from session if available
+    product_results = None
+    try:
+        product_results = session.get('latest_results')
+    except Exception:
+        product_results = None
 
-    # Generate violations based on CSV data analysis
-    violations = []
-    if all_products:
-        # Check for common compliance issues
-        for product in all_products[:5]:  # Check first 5 products
-            if not product.get('price'):
-                violations.append({"rule": "Missing Price", "violation": f"Product {product.get('name', 'Unknown')} has no price information"})
-            if not product.get('details'):
-                violations.append({"rule": "Missing Details", "violation": f"Product {product.get('name', 'Unknown')} has no product details"})
-    
-    # If no violations found, add some sample ones
-    if not violations:
-        violations = [
-            {"rule": "Data Validation", "violation": "All products have required information"},
-            {"rule": "Price Compliance", "violation": "Prices are within acceptable ranges"},
-            {"rule": "Product Details", "violation": "Product descriptions are complete"}
-        ]
+    # Prepare compliance info table
+    compliance_fields = [
+        ('Product Name', product_results['data']['product'] if product_results else None),
+        ('Manufacturer / Packer / Importer', product_results['data']['manufacturer'] if product_results else None),
+        ('Address', product_results['data']['address'] if product_results else None),
+        ('Commodity Name', product_results['data']['commodity'] if product_results else None),
+        ('Net Quantity', product_results['data']['net_quantity'] if product_results else None),
+        ('MRP (₹)', product_results['data']['mrp'] if product_results else None),
+        ('Date of Manufacture / Import', product_results['data']['date'] if product_results else None),
+        ('Consumer Care Details', product_results['data']['consumer_care'] if product_results else None),
+        ('Country of Origin', product_results['data']['origin'] if product_results else None)
+    ]
 
-    pdf_path = "static/violation_report.pdf"
-    c = canvas.Canvas(pdf_path, pagesize=A4)
-    width, height = A4
+    # OCR text for PDF
+    ocr_text = product_results['data']['raw_text'] if product_results and 'raw_text' in product_results['data'] else ''
 
-    # Header
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(40, height-50, "Violation Report")
-    c.setFont("Helvetica", 10)
-    c.drawString(40, height-70, f"Generated On: {datetime.now().strftime('%d-%m-%Y %H:%M')}")
+    # Compliance table for PDF
+    compliance_table = [['Field', 'Status', 'Info']]
+    for label, info in compliance_fields:
+        status = 'Present' if info and info != 'Not Found' else 'Absent'
+        mark = '✔' if status == 'Present' else '✘'
+        compliance_table.append([label, f'{mark} {status}', info or 'Not Found'])
 
-    # Uploaded Image
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(40, height-100, "1. Uploaded Image")
-    if os.path.exists(uploaded_file):
-        c.drawImage(uploaded_file, 40, height-400, width=250, height=180)
-
-    # Processed Image
-    c.drawString(320, height-100, "2. Processed Image")
-    if os.path.exists(processed_file):
-        c.drawImage(processed_file, 320, height-400, width=250, height=180)
-
-    # OCR Extracted Text
-    c.drawString(40, height-420, "3. OCR Extracted Text")
-    y_text = height-440
-    c.setFont("Helvetica", 10)
-    for line in ocr_text.split("\n"):
-        c.drawString(50, y_text, line)
-        y_text -= 15
-
-    # Violation Rules Table
-    c.drawString(40, y_text-20, "4. Violation Rules Detected")
-    data = [["Rule", "Violation Detected"]]
-    for v in violations:
-        data.append([v["rule"], v["violation"]])
-
-    table = Table(data, colWidths=[200, 300])
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
-        ('TEXTCOLOR', (0,0), (-1,0), colors.black),
-        ('ALIGN',(0,0),(-1,-1),'LEFT'),
-        ('GRID', (0,0), (-1,-1), 1, colors.black),
-        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold')
-
-        
-    ]))
-    table.wrapOn(c, width, height)
-    table.drawOn(c, 40, y_text-160)
-
-    c.save()
-    return send_file(pdf_path, as_attachment=True)  
+    # Use new black-and-white report generator
+    from bw_report_generator import generate_bw_report
+    pdf_path = generate_bw_report(product_results, compliance_table, compliance_score, uploaded_file, processed_file)
+    return send_file(pdf_path, as_attachment=True)
 
 # -----------------------------
 # Run App
