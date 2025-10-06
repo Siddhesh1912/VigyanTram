@@ -55,6 +55,15 @@ from ocr_processing import preprocess_for_ocr
 import re
 from field_extraction import extract_product_fields
 
+# Set tesseract path
+if os.name == 'nt':
+    pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+    os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR\tessdata"
+    os.environ['PATH'] += r";C:\Program Files\Tesseract-OCR"
+else:
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+    os.environ['TESSDATA_PREFIX'] = "/usr/share/tesseract-ocr/5/tessdata"
+
 
 """Flask app for product monitoring and compliance checks."""
 
@@ -62,12 +71,6 @@ from field_extraction import extract_product_fields
 # Flask App Setup
 # -----------------------------
 app = Flask(__name__)
-if os.name == 'nt':
-    t_path = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-    pytesseract.pytesseract.tesseract_cmd = t_path
-    # Also add to PATH
-    os.environ['PATH'] += r";C:\Program Files\Tesseract-OCR"
-    os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR\tessdata"
 app.secret_key = "your_secret_key"   # Required for sessions
 
 # Serve rules.json for frontend fetch
