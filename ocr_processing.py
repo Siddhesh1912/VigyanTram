@@ -1,4 +1,5 @@
 import os
+import platform
 from typing import Tuple, Optional
 
 from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
@@ -8,7 +9,7 @@ import numpy as np
 
 
 # Set tesseract path
-if os.name == 'nt':
+if platform.system() == 'Windows':
     pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
     os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR\tessdata"
 else:

@@ -54,9 +54,10 @@ import numpy as np
 from ocr_processing import preprocess_for_ocr
 import re
 from field_extraction import extract_product_fields
+import platform
 
 # Set tesseract path
-if os.name == 'nt':
+if platform.system() == 'Windows':
     pytesseract.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
     os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR\tessdata"
     os.environ['PATH'] += r";C:\Program Files\Tesseract-OCR"
